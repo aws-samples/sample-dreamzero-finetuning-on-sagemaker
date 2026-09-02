@@ -772,8 +772,8 @@ optional extras grant no rights at all:
   extras, **declare no license at all**, so no permission is granted by default.
 
 [THIRD-PARTY-LICENSES](THIRD-PARTY-LICENSES) is the authoritative list and
-carries the reasoning for each; the Apache-2.0 text itself is in
-[LICENSE-Apache-2.0](LICENSE-Apache-2.0). The table below is what the **code**
+carries the reasoning for each, plus a verbatim copy of the Apache-2.0 text
+(license §4(a) requires one to travel with the distribution). The table below is what the **code**
 stages, at the exact revision it pins — not whatever upstream happens to publish
 today.
 
