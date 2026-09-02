@@ -1,0 +1,51 @@
+# Embodiment mapping config — ALOHA-like bimanual robot, 14-dim state/action.
+# This is the per-robot semantics the pipeline CANNOT infer safely:
+# wrong camera->view mapping or wrong dim slices trains garbage without erroring.
+#
+# This default reproduces the validated aloha_static_screw_driver prep
+# byte-for-byte.
+
+embodiment_tag: yam
+
+# source camera feature name (without observation.images. prefix) -> yam view.
+# Semantic order matters: top = scene camera, left/right = wrist cameras.
+# Source cameras NOT listed here are dropped (e.g. ALOHA's cam_low).
+camera_map:
+  cam_high: top_camera-images-rgb
+  cam_left_wrist: left_camera-images-rgb
+  cam_right_wrist: right_camera-images-rgb
+
+# packed state/action vector layout: name -> [start, end)
+state_keys:
+  left_joint_pos: [0, 6]
+  left_gripper_pos: [6, 7]
+  right_joint_pos: [7, 13]
+  right_gripper_pos: [13, 14]
+action_keys:
+  left_joint_pos: [0, 6]
+  left_gripper_pos: [6, 7]
+  right_joint_pos: [7, 13]
+  right_gripper_pos: [13, 14]
+relative_action_keys:
+  - left_joint_pos
+  - left_gripper_pos
+  - right_joint_pos
+  - right_gripper_pos
+
+# language annotation column in the parquet (stock LeRobot: integer task_index
+# resolved through meta/tasks.jsonl)
+task_key: task_index
+
+action_horizon: 24
+
+# dataset frame rate (ALOHA records at 50). Cross-checked against the
+# dataset's meta/info.json at the validate stage and forwarded to training as
+# fps.yam — which the trainer's decord video backend never actually reads:
+# frames align to the parquet timestamps via video PTS, and action chunks are
+# frame-index arithmetic. Keep it accurate anyway (the torchcodec backend
+# would consume it, and a wrong value here usually means the config was
+# copied from a different robot).
+fps: 50
+
+# videos are re-encoded to h264/yuv420p iff the source codec is in this list
+reencode_codecs: [av1, av01]

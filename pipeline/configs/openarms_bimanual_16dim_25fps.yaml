@@ -1,0 +1,41 @@
+# Embodiment mapping config — OpenArms bimanual, 16-dim state/action, 25 fps.
+# For the pick-and-place-v3.0 dataset (LeRobot v3.0 -> v2.1 via
+# convert_lerobot_v3_to_v21.py). Copy of the repo's
+# pipeline/configs/openarms_bimanual_16dim.yaml with fps 30 -> 25:
+# v3.0 records at 25 fps (v2.0 recorded at 30). fps drives the fps.yam
+# training override — a wrong value trains a broken model with no error.
+
+embodiment_tag: yam
+
+# Identity map ON PURPOSE: convert_lerobot_v3_to_v21.py already renames the
+# source cameras to these yam names (front/ego -> top_camera-images-rgb,
+# wrist_left -> left_camera-images-rgb, wrist_right -> right_camera-images-rgb;
+# it prints the mapping it used), so the v2.1 dataset this pipeline sees carries
+# yam names already. Do NOT put the source camera names here.
+camera_map:
+  top_camera-images-rgb: top_camera-images-rgb
+  left_camera-images-rgb: left_camera-images-rgb
+  right_camera-images-rgb: right_camera-images-rgb
+
+state_keys:
+  left_joint_pos: [0, 7]
+  left_gripper_pos: [7, 8]
+  right_joint_pos: [8, 15]
+  right_gripper_pos: [15, 16]
+action_keys:
+  left_joint_pos: [0, 7]
+  left_gripper_pos: [7, 8]
+  right_joint_pos: [8, 15]
+  right_gripper_pos: [15, 16]
+relative_action_keys:
+  - left_joint_pos
+  - left_gripper_pos
+  - right_joint_pos
+  - right_gripper_pos
+
+task_key: task_index
+action_horizon: 24
+fps: 25
+
+# converter outputs h264 — prep copies videos without re-encoding
+reencode_codecs: [av1, av01]

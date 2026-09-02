@@ -1,0 +1,14 @@
+{
+  "app": "python3 app.py",
+  "watch": {
+    "include": ["**"],
+    "exclude": ["README.md", "cdk*.json", ".venv/**", "**/__pycache__/**"]
+  },
+  "context": {
+    "project": "dreamzero",
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-ecr:disableImageScanOnPushByDefault": false,
+    "@aws-cdk/core:target-partitions": ["aws"]
+  }
+}

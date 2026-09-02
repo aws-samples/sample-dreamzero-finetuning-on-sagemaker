@@ -1,0 +1,36 @@
+diff --git a/groot/vla/data/dataset/lerobot_sharded.py b/groot/vla/data/dataset/lerobot_sharded.py
+index 409fa37..70cf9f7 100755
+--- a/groot/vla/data/dataset/lerobot_sharded.py
++++ b/groot/vla/data/dataset/lerobot_sharded.py
+@@ -1162,9 +1162,14 @@ class ShardedLeRobotSubLangSingleActionChunkDatasetDROID(LeRobotSingleDataset):
+         
+         def add_step_set(anchor_index: int) -> None:
+             # Only add a complete 4-frame set if it fully fits and capacity allows
+-            # Require full 32-frame window to exist for alignment with action/state
++            # Require full 32-frame window to exist for alignment with action/state.
++            # +24 (not +23): the final "+3 extra frame" below needs anchor+24 to be
++            # in bounds too. With +23 a chunk anchored at L-24 is accepted here but
++            # the extra frame does not fit, triggering the [:-7] trim -- the sample
++            # silently drops to 3 chunks while action/state target 4, and a batch
++            # mixing 3- and 4-chunk samples crashes np.stack in the collator.
+             nonlocal sampled_list
+-            if anchor_index < 0 or anchor_index + 23 >= trajectory_length:
++            if anchor_index < 0 or anchor_index + 24 >= trajectory_length:
+                 return
+             if len(sampled_list) + len(per_step_offsets) > max_frames:
+                 return
+@@ -1231,6 +1236,14 @@ class ShardedLeRobotSubLangSingleActionChunkDatasetDROID(LeRobotSingleDataset):
+         
+         # Store the number of chunks for alignment with action/state
+         num_video_chunks = (unique_sorted.size - 1) // 8
++        # Uniform-shape guard: the training config hardcodes num_frames=33 /
++        # frame_seqlen for exactly max_chunk_size chunks, and the collator
++        # np.stack()s samples, so a short sample (possible only when the
++        # trajectory is too short to fit max_chunk_size full windows) must be
++        # skipped -- returning empty makes get_step_data drop it -- rather than
++        # yielded with a divergent shape.
++        if num_video_chunks < self.max_chunk_size:
++            return np.array([])
+         if not hasattr(self, '_current_num_chunks'):
+             self._current_num_chunks = {}
+         # Use first_idx as a key to track the current sample's chunk count

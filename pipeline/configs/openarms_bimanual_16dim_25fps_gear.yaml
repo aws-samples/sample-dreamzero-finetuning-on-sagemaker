@@ -1,0 +1,61 @@
+# Embodiment mapping config — OpenArms bimanual, 16-dim, 25 fps, PRE-PREPPED.
+#
+# Identical to openarms_bimanual_16dim_25fps.yaml except for `format: gear`.
+#
+# Why a separate file: the real+sim pooled dataset must NOT be re-prepped by the
+# pipeline. Its meta/stats.json and meta/relative_stats_dreamzero.json were
+# deliberately recomputed from the REAL episodes only, because the GEAR step
+# derives q01/q99 from whatever tree it is given and sim nests inside real
+# (sim's left arm is frozen — its left-gripper relative delta is exactly 0.0 in
+# 100% of rows). With sim at ~58% of anchors the pooled 1st/99th percentile
+# lands on real's own 2.41/97.59 percentile, and
+# groot/vla/data/transform/state_action.py then hard-clamps every target outside
+# it: measured 4.5438% of real's relative targets clamped under pooled stats vs
+# 1.9936% under real-only — a 2.28x regression, plus a matching cap on the
+# largest delta the policy can emit at inference, since de-normalisation reuses
+# the same quantiles.
+#
+# prep_dataset.py starts with `if dst.exists(): shutil.rmtree(dst)` and the GEAR
+# converter only skips stats files that already exist in ITS OWN output dir, so
+# letting the prep stage run would silently recompute the pooled values and undo
+# the fix. `format: gear` makes run_pipeline.py skip detect/convert/prep and
+# stage the tree as-is (run_pipeline.py:829-888), and validate with --gear so the
+# layout is read from meta/modality.json.
+#
+# Use with a dataset that already carries meta/{modality,embodiment}.json,
+# stats.json and relative_stats_dreamzero.json — i.e. the output of
+# prep_dataset.py, not a raw LeRobot v2.1 tree.
+
+format: gear
+
+embodiment_tag: yam
+
+# Identity map ON PURPOSE: convert_lerobot_v3_to_v21.py already renames the
+# source cameras to these yam names, so the dataset carries yam names already.
+camera_map:
+  top_camera-images-rgb: top_camera-images-rgb
+  left_camera-images-rgb: left_camera-images-rgb
+  right_camera-images-rgb: right_camera-images-rgb
+
+state_keys:
+  left_joint_pos: [0, 7]
+  left_gripper_pos: [7, 8]
+  right_joint_pos: [8, 15]
+  right_gripper_pos: [15, 16]
+action_keys:
+  left_joint_pos: [0, 7]
+  left_gripper_pos: [7, 8]
+  right_joint_pos: [8, 15]
+  right_gripper_pos: [15, 16]
+relative_action_keys:
+  - left_joint_pos
+  - left_gripper_pos
+  - right_joint_pos
+  - right_gripper_pos
+
+task_key: task_index
+action_horizon: 24
+fps: 25
+
+# already h264 — nothing to re-encode (inert under format: gear, kept for parity)
+reencode_codecs: [av1, av01]

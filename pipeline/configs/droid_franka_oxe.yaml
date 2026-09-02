@@ -1,0 +1,17 @@
+# DROID (single-arm Franka) — pre-prepped GEAR dataset.
+#
+# Use with the GEAR-Dreams/DreamZero-DROID-Data HuggingFace dataset (~144GB,
+# 57,774 episodes). It already ships the GEAR metadata the trainer needs
+# (meta/modality.json, meta/relative_stats_dreamzero.json), so the pipeline
+# skips the convert and prep stages and stages it to S3 as-is.
+#
+# Why DROID: it is the embodiment with a documented Isaac Sim closed-loop
+# evaluation path (the sim-evals project) — see the README's
+# "Closed-loop evaluation in Isaac Sim (DROID)" section.
+
+format: gear            # already GEAR-prepped -> pipeline skips convert/prep
+recipe: droid           # training entrypoint uses data=dreamzero/droid_relative
+embodiment_tag: oxe_droid
+
+# dataset frame rate — validation cross-checks meta/info.json
+fps: 15

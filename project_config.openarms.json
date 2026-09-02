@@ -1,0 +1,42 @@
+{
+  "_comment": "Second worked example: a 16-dim bimanual arm (OpenArms) at 25fps on ml.g7e.48xlarge, as opposed to the ALOHA demo that project_config.json ships. Use it with: python3 pipeline/run_pipeline.py --name my-run --project-config project_config.openarms.json. It carries no 'solution' or 'image' block on purpose — pipeline/solution.py and cdk/app.py always read the repo-root project_config.json and ignore --project-config, so those two blocks only ever take effect there.",
+
+  "dataset": {
+    "_comment": "source=local expects the data already in the repo's dataset/ folder, which is gitignored — so this path will NOT exist in a fresh clone. Point local_path at your own LeRobot v2.1 dataset, or switch to source=huggingface + repo_id. See dataset/README.md.",
+    "source": "local",
+    "repo_id": null,
+    "revision": null,
+    "local_path": "dataset/openarm_v21_150ep_25fps",
+    "cache_dir": "dataset"
+  },
+
+  "embodiment_config": "configs/openarms_bimanual_16dim_25fps.yaml",
+
+  "training": {
+    "_comment": "lr 5e-5, LoRA rank/alpha 32 (fully-qualified — bare lora_rank fails hydra), effective batch 16 via global_batch_size (per-device batch 2 OOMs on 96GB GPUs; the trainer derives grad-accum from world size). dataloader_num_workers=8 is sized for ml.g7e.48xlarge's 2TiB host RAM — drop to 4 on smaller hosts (see the 'Host RAM' caveat in pipeline/README.md).",
+    "_comment_cost": "5000 steps measured 30.15 s/step on ml.g7e.48xlarge = ~42h = ~$1700 on-demand. Cost is linear in max_steps: measure seconds/step at the smoke gate (logging_steps=1 with smoke.steps=30 gives ~20 steady-state timings) and project the full run BEFORE the train stage — pass --stop-after smoke, because the default stage range runs straight through train and merge with no prompt.",
+    "_comment_horizon": "Pick the horizon before launching. Resuming a finished run at a higher max_steps is a warm restart, not 'training longer': scheduler.pt restores only position, not the curve, so the LR jumps back to ~54% of peak in one step with no warmup. Treat any extension as a deliberate second phase at reduced LR.",
+    "max_steps": 5000,
+    "save_steps": 500,
+    "learning_rate": "5e-5",
+    "per_device_train_batch_size": 1,
+    "seed": 42,
+    "warmup_ratio": 0.05,
+    "dataloader_num_workers": 8,
+    "extra_overrides": "action_head_cfg.config.lora_rank=32 action_head_cfg.config.lora_alpha=32 ++train_dataset.dataset_kwargs.num_steps_per_shard=2500 logging_steps=1 global_batch_size=16"
+  },
+
+  "compute": {
+    "_comment": "ml.g7e.48xlarge (8x 96GB). volume_gb is inert on instance types with NVMe instance store — this one gets ~13TiB of scratch regardless of the 500 below. It only bites on EBS-only types, where 119GiB of input channels plus (save_total_limit + 1) x ~89GiB of checkpoints needs >=900. Runtime caps are not billed; only actual usage is.",
+    "smoke": { "instance_type": "ml.g7e.48xlarge", "volume_gb": 500, "max_runtime_hours": 3, "steps": 30 },
+    "train": { "instance_type": "ml.g7e.48xlarge", "volume_gb": 500, "max_runtime_hours": 100 },
+    "merge": { "instance_type": "ml.g7e.48xlarge", "volume_gb": 500, "max_runtime_hours": 4 },
+    "eval":  { "instance_type": "ml.g7e.48xlarge", "max_runtime_hours": 12 }
+  },
+
+  "validation": {
+    "enabled": true,
+    "fail_on_action_equals_state": false,
+    "degeneracy_sample_rows": 2000
+  }
+}

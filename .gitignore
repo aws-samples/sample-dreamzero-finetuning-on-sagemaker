@@ -1,0 +1,39 @@
+# Development files — not part of the published sample
+HANDOFF_INTERNAL.md
+CLAUDE.md
+scrub_check.sh
+
+# Account-specific config, generated per-account by the CDK stack
+pipeline/pipeline_config.json
+
+# Local datasets — data, never committed (see dataset/README.md).
+# The negation re-includes only the README file; the third line keeps a
+# *directory* that happens to be named README.md ignored (the negation
+# alone would otherwise re-include everything beneath it).
+dataset/*
+!dataset/README.md
+dataset/README.md/*
+
+# Python / CDK build artifacts
+__pycache__/
+*.pyc
+.venv/
+cdk.out/
+node_modules/
+
+# Editor, OS and scanner noise
+.vscode/
+.idea/
+.DS_Store
+.holmes/
+
+# Run logs from local drivers/watchers
+*.log
+
+# Local scratch and helper scripts — never committed
+local_files/
+isaac_dcv4.sh
+
+# DreamZero upstream clone created by setup.sh (prep-stage converter).
+# Third-party code — users clone it themselves; never committed.
+dreamzero/

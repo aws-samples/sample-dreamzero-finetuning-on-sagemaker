@@ -1,0 +1,36 @@
+# Embodiment mapping config — example bimanual robot with 16-dim state/action
+# 7 joints + 1 gripper per arm: [l_joint(0:7), l_grip(7:8), r_joint(8:15), r_grip(15:16)]
+# Dataset records at 30 fps. Cross-checked against the dataset's own meta at
+# the validate stage (a mismatch usually means a config copied from another
+# robot); the trainer's decord backend doesn't consume it at train time.
+
+embodiment_tag: yam
+
+# This example dataset already carries yam camera names — identity map.
+camera_map:
+  top_camera-images-rgb: top_camera-images-rgb
+  left_camera-images-rgb: left_camera-images-rgb
+  right_camera-images-rgb: right_camera-images-rgb
+
+state_keys:
+  left_joint_pos: [0, 7]
+  left_gripper_pos: [7, 8]
+  right_joint_pos: [8, 15]
+  right_gripper_pos: [15, 16]
+action_keys:
+  left_joint_pos: [0, 7]
+  left_gripper_pos: [7, 8]
+  right_joint_pos: [8, 15]
+  right_gripper_pos: [15, 16]
+relative_action_keys:
+  - left_joint_pos
+  - left_gripper_pos
+  - right_joint_pos
+  - right_gripper_pos
+
+task_key: task_index
+action_horizon: 24
+fps: 30
+
+# videos are already h264 — nothing to re-encode
+reencode_codecs: [av1, av01]

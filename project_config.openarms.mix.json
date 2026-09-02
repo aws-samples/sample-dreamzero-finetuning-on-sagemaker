@@ -1,0 +1,45 @@
+{
+  "_comment": "Run knobs for the 50/50 real+sim POOLED fine-tune. Copy of project_config.openarms.json with the dataset repointed at the pre-prepped pooled GEAR tree. NEVER edit the repo-root project_config.json to launch a run: it is simultaneously the published demo default (the Costs table in README.md measures it) and the per-run knob file, so editing it in place overwrites the shipped defaults. Use: python3 pipeline/run_pipeline.py --name <run> --project-config project_config.openarms.mix.json. It carries no 'solution' or 'image' block on purpose — pipeline/solution.py and cdk/app.py always read the repo-root project_config.json and ignore --project-config.",
+
+  "dataset": {
+    "_comment": "PRE-PREPPED GEAR tree, not raw LeRobot v2.1. Built by: (1) convert_lerobot_v3_to_v21.py on real pick-and-place-v3.1 (143 eps) and on the sim cube corpus (149 eps); (2) a pooled shuffle-merge into dataset/openarm_mix_real143_sim149_25fps (292 eps, seed 42, one unified task string); (3) pipeline/split_dataset.py holding out 32 eps (16 real stratified 8 LEFT/8 RIGHT + 16 sim) into dataset/openarm_mix_holdout32; (4) prep_dataset.py; (5) stats.json + relative_stats_dreamzero.json recomputed from the 127 REAL episodes only. The matching embodiment config sets format: gear so the pipeline skips detect/convert/prep and does NOT recompute those stats — see that file's header for why that matters (4.54% -> 1.99% clamped real targets). Provenance per episode is in meta/mix_manifest.json; the measured before/after is in meta/normalisation_report.json.",
+    "source": "local",
+    "repo_id": null,
+    "revision": null,
+    "local_path": "dataset/gear_mix_train260",
+    "cache_dir": "dataset"
+  },
+
+  "embodiment_config": "configs/openarms_bimanual_16dim_25fps_gear.yaml",
+
+  "training": {
+    "_comment": "Unchanged from project_config.openarms.json: lr 5e-5, LoRA rank/alpha 32 (fully-qualified — bare lora_rank fails hydra), effective batch 16 via global_batch_size (per-device 2 OOMs on 96GB GPUs; the trainer derives grad-accum from world size, 16//(1*8)=2). dataloader_num_workers=8 is sized for ml.g7e.48xlarge's 2TiB host RAM.",
+    "_comment_cost": "MEASURED ON THIS CORPUS at the smoke gate 2026-08-28 (a 30-step smoke job on this instance type, Completed, billable 2085s): steady-state 30.00 s/step (median of 25 intervals, spread 29-31s) and 1185s of fixed overhead (2085 - 30x30). So billable_s = 1185 + 30.00 x max_steps. At 7500 steps that is 226,185s = 62.83h = ~$2,603 at the $41.4304/h us-east-1/2 + us-west-2 g7e.48xl Train rate; eu-central-1 is $70.454425/h = 1.70x = ~$4,427. Cost is linear in max_steps. Two ceilings, both above this run: compute.train.max_runtime_hours=100 below, and the ACCOUNT quota L-33A961FD 'Longest run time for a training job' = 432,000s = 120h (adjustable, at its default, no prior request) — beyond ~14,300 steps you must raise it first. Two independent cross-checks agreed on the step time: the container's training_step counter is a MICROSTEP counter (final index 59 / 60 distinct for 30 optimizer steps, confirming grad_accum=2) at 14.760 s/microstep, and tqdm's own final rate. Re-measure at the smoke gate before changing instance type or corpus; do not reuse this number across either.",
+    "_comment_corpus": "This corpus is 2.3x larger than the 150-ep run these settings were measured on: 260 eps / 111,470 frames / ~105.7k anchors vs ~19.9k. At 7500 steps x batch 16 each anchor is drawn ~1.135 times on average, so a fixed step count buys far fewer revisits per anchor than before — do not read 7500 steps here as equivalent to 7500 steps there. Matching the prior run's revisits-per-anchor would need ~37,000 steps (~309h), which exceeds the 120h L-33A961FD quota (and its 28-day hard cap only just admits it).",
+    "_comment_mix": "Gradient share is 41.7% real / 58.3% sim by training anchors, NOT 50/50 — 50/50 was chosen by EPISODE count (127 real + 133 sim), and sim's episodes are longer. Report results on the REAL half of the holdout only; the pooled number is not a real-robot number.",
+    "_comment_horizon": "Pick the horizon before launching. Resuming a finished run at a higher max_steps is a warm restart, not 'training longer': scheduler.pt restores only position, not the curve, so the LR jumps back to ~54% of peak in one step with no warmup. Treat any extension as a deliberate second phase at reduced LR.",
+    "max_steps": 7500,
+    "save_steps": 500,
+    "learning_rate": "5e-5",
+    "per_device_train_batch_size": 1,
+    "seed": 42,
+    "warmup_ratio": 0.05,
+    "dataloader_num_workers": 8,
+    "extra_overrides": "action_head_cfg.config.lora_rank=32 action_head_cfg.config.lora_alpha=32 ++train_dataset.dataset_kwargs.num_steps_per_shard=2500 logging_steps=1 global_batch_size=16"
+  },
+
+  "compute": {
+    "_comment": "ml.g7e.48xlarge (8x 96GB). volume_gb is inert on NVMe instance-store types — this one gets ~13TiB of scratch regardless of the 500 below. train.max_runtime_hours=100 is required: the repo-root project_config.json's 12h cap admits only ~1,399 steps at 30.00 s/step and would fail this run with MaxRuntimeExceeded. 100h leaves 37.2h of margin over the measured 62.83h projection and stays under the 120h L-33A961FD account quota. Runtime caps are not billed; only actual usage is. Checkpoint mirroring has no --delete, so floor(7500/500)=15 saves x ~88.7GiB = ~1.30TiB of S3 is permanent (~$31/month at us-east-2 Standard).",
+    "smoke": { "instance_type": "ml.g7e.48xlarge", "volume_gb": 500, "max_runtime_hours": 3, "steps": 30 },
+    "train": { "instance_type": "ml.g7e.48xlarge", "volume_gb": 500, "max_runtime_hours": 100 },
+    "merge": { "instance_type": "ml.g7e.48xlarge", "volume_gb": 500, "max_runtime_hours": 4 },
+    "eval":  { "instance_type": "ml.g7e.48xlarge", "max_runtime_hours": 12 }
+  },
+
+  "validation": {
+    "_comment": "degeneracy_sample_rows is nearly worthless on a SHUFFLED pooled tree: validate_dataset.py fills its row budget from the lowest-numbered episode files, so it inspects only the first ~4-6 episodes whatever the budget. It was run separately over all 124,950 rows during the build. Kept enabled for the cheap structural checks (slice bounds, camera keys, fps, task, completeness), which are what actually matter here.",
+    "enabled": true,
+    "fail_on_action_equals_state": false,
+    "degeneracy_sample_rows": 2000
+  }
+}

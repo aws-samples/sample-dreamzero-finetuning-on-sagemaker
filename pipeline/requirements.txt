@@ -1,0 +1,13 @@
+# Python dependencies for the pipeline scripts (run_pipeline.py,
+# prep_dataset.py, stage_base_assets.py, split_dataset.py, evaluation/).
+# The training itself runs inside the container image — nothing here affects it.
+# Floors only: these are driver-side scripts, and the floors are the oldest
+# versions the used APIs are known-good on.
+boto3>=1.28
+huggingface_hub>=0.23
+hf_transfer>=0.1.4
+pyyaml>=5.4
+imageio-ffmpeg>=0.4.8
+numpy>=1.24
+pyarrow>=14.0.1
+pandas>=2.0

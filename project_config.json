@@ -1,0 +1,54 @@
+{
+  "_comment": "Per-run knobs, most-edited first. Account infra lives in pipeline/pipeline_config.json (CDK-generated); per-robot semantics in pipeline/configs/*.yaml. CLI flags override anything here. The two blocks NOT to edit per run are 'solution' and 'image' (see their own comments). project_config.openarms.json is a second worked example — a 16-dim bimanual arm on ml.g7e.48xlarge — usable with --project-config, and project_config.openarms.mix.json is a third: the same arm trained on a pooled real+sim corpus, which needs a PRE-PREPPED dataset (its embodiment config sets format: gear so the pipeline does not recompute normalisation stats). Neither ships the dataset itself; read the dataset._comment in each before using it.",
+
+  "dataset": {
+    "_comment": "revision v2.1 = the LeRobot-v2.1-format branch of the HF repo (main may be v3-format). Local data goes in the repo's dataset/ folder (gitignored): set source=local and local_path=dataset/<your_dataset>. HF downloads land in <cache_dir>/<run name>/; relative paths resolve against the repo root. See dataset/README.md.",
+    "source": "huggingface",
+    "repo_id": "lerobot/aloha_static_screw_driver",
+    "revision": "v2.1",
+    "local_path": null,
+    "cache_dir": "dataset"
+  },
+
+  "embodiment_config": "configs/aloha_bimanual_14dim.yaml",
+
+  "training": {
+    "_comment": "The shipped defaults are the demo run the Costs table in README.md measures: 1000 steps on ml.g7e.24xlarge, ~4h11m, ~$93. Cost is linear in max_steps, so raising it raises the bill proportionally — measure seconds/step at the smoke gate and project the full run before the train stage (pass --stop-after smoke; the default stage range runs through train and merge with no prompt).",
+    "_comment_loader_ram": "The sharded loader decodes a whole shard of video into host RAM per dataloader worker (~rows x cameras x HxWx3 bytes, roughly double while the next shard prefetches). At the trainer defaults (8 workers/GPU, 10k-row shards) the ALOHA demo needs ~880GB on a 4-GPU instance and the job dies with 'DataLoader worker exited unexpectedly' + a SageMaker 'use an instance type with more memory' ClientError. 4 workers x 2.5k-row shards keeps it near ~220GB peak.",
+    "_comment_horizon": "Pick the horizon before launching. Resuming a finished run at a higher max_steps is a warm restart, not 'training longer': scheduler.pt restores only position, not the curve, so the LR jumps back to a large fraction of peak in one step with no warmup. Treat any extension as a deliberate second phase at reduced LR.",
+    "max_steps": 1000,
+    "save_steps": 500,
+    "learning_rate": "1e-5",
+    "per_device_train_batch_size": 1,
+    "seed": 42,
+    "warmup_ratio": 0.05,
+    "dataloader_num_workers": 4,
+    "extra_overrides": "++train_dataset.dataset_kwargs.num_steps_per_shard=2500"
+  },
+
+  "compute": {
+    "_comment": "Per-stage instance settings. volume_gb is inert on instance types with NVMe instance store (g7e gets its full instance store regardless); it only binds on EBS-only types, where 119GiB of input channels plus (save_total_limit + 1) x ~89GiB of checkpoints needs >=900. Runtime caps are not billed; only actual usage is.",
+    "smoke": { "instance_type": "ml.g7e.24xlarge", "volume_gb": 500, "max_runtime_hours": 3, "steps": 10 },
+    "train": { "instance_type": "ml.g7e.24xlarge", "volume_gb": 500, "max_runtime_hours": 12 },
+    "merge": { "instance_type": "ml.g7e.24xlarge", "volume_gb": 500, "max_runtime_hours": 3 },
+    "eval":  { "instance_type": "ml.g7e.24xlarge", "max_runtime_hours": 6 }
+  },
+
+  "validation": {
+    "enabled": true,
+    "fail_on_action_equals_state": false,
+    "degeneracy_sample_rows": 2000
+  },
+
+  "image": {
+    "_comment": "ECR tag the deploy-time image build pushes. Read from THIS file only (cdk/app.py resolves it and ignores --project-config) — see cdk/README.md.",
+    "tag": "v11"
+  },
+
+  "solution": {
+    "_comment": "AWS Solution identity — the single source of truth for both reporting mechanisms: the CloudFormation stack Description (deployment counting) and the AWS SDK User-Agent suffix (API usage attribution). Not a per-run knob: bump 'version' when cutting a release and otherwise leave it alone. pipeline/solution.py is the only reader and always reads THIS file, not the --project-config override, so a per-run config cannot strip the identity. See pipeline/solution.py for the exact formats.",
+    "id": "SO0362",
+    "name": "DreamZero Finetuning on Amazon SageMaker",
+    "version": "v1.0.0"
+  }
+}

@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="700" viewBox="0 0 1080 700" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#898781"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#2a78d6"/>
+    </marker>
+  </defs>
+
+  <rect width="1080" height="700" fill="#fcfcfb"/>
+
+  <!-- title -->
+  <text x="24" y="34" font-size="19" font-weight="700" fill="#0b0b0b">DreamZero fine-tuning on SageMaker: S3 is the system of record</text>
+  <text x="24" y="56" font-size="12.5" fill="#52514e">Compute is disposable — every stage reads from and writes back to S3. Starred (*) resources are provisioned once by the CDK stack.</text>
+
+  <!-- ============ one-time setup strip ============ -->
+  <g>
+    <rect x="24" y="74" width="1032" height="88" rx="8" fill="#f5f4f0" stroke="#c3c2b7" stroke-width="1.2"/>
+    <text x="44" y="100" font-size="13.5" font-weight="700" fill="#0b0b0b">One-time, per region — cdk deploy</text>
+    <text x="44" y="122" font-size="11.5" fill="#52514e">Provisions: ECR repo* · S3 bucket + prefix layout* · SageMaker execution role* · EC2 instance profile* · CodeBuild image factory* · SSM /dreamzero/&lt;project&gt;/*</text>
+    <text x="44" y="144" font-size="11.5" fill="#1c5cab">CodeBuild then builds the BYOC training image (~1 h — flash-attn from source), pushes it to ECR*, and writes the digest-pinned image_uri to SSM*. Jobs use the digest, never the tag.</text>
+  </g>
+
+  <!-- ============ column 1: upstream + operator ============ -->
+  <g>
+    <rect x="24" y="182" width="232" height="130" rx="8" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1.2"/>
+    <text x="40" y="206" font-size="13" font-weight="600" fill="#0b0b0b">HuggingFace (one-time)</text>
+    <text x="40" y="228" font-size="11" fill="#52514e">lerobot/aloha_static_screw_driver</text>
+    <text x="40" y="244" font-size="11" fill="#898781">@ v2.1 — the demo dataset</text>
+    <text x="40" y="264" font-size="11" fill="#52514e">Wan2.1-I2V-14B-480P    ~77 GB</text>
+    <text x="40" y="280" font-size="11" fill="#52514e">umt5-xxl tokenizer      21 MB</text>
+    <text x="40" y="296" font-size="11" fill="#52514e">DreamZero-AgiBot       ~43 GB</text>
+  </g>
+
+  <line x1="140" y1="312" x2="140" y2="342" stroke="#898781" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="24" y="346" width="232" height="152" rx="8" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1.2"/>
+    <text x="40" y="370" font-size="13" font-weight="600" fill="#0b0b0b">Your workstation</text>
+    <text x="40" y="392" font-size="11" fill="#52514e">./setup.sh — python deps, the</text>
+    <text x="40" y="408" font-size="11" fill="#52514e">DreamZero clone pinned @ ab790c1</text>
+    <text x="40" y="430" font-size="11" fill="#52514e">run_pipeline.py stages 1–6:</text>
+    <text x="40" y="446" font-size="10.5" fill="#52514e">fetch → detect → convert →</text>
+    <text x="40" y="460" font-size="10.5" fill="#52514e">validate → prep → stage</text>
+    <text x="40" y="478" font-size="10.5" fill="#898781">AV1→h264, camera rename, GEAR</text>
+    <text x="40" y="491" font-size="10.5" fill="#898781">meta — all local (~250 GB disk)</text>
+  </g>
+
+  <!-- ============ column 2: S3 hub ============ -->
+  <g>
+    <rect x="300" y="182" width="268" height="402" rx="8" fill="#eef4fc" stroke="#2a78d6" stroke-width="1.6"/>
+    <text x="316" y="206" font-size="12.5" font-weight="700" fill="#0b0b0b">Amazon S3* — &lt;bucket&gt;/sagemaker/</text>
+
+    <text x="316" y="230" font-size="11" fill="#52514e">datasets/&lt;name&gt;/</text>
+    <text x="316" y="245" font-size="10.5" fill="#898781">staged GEAR corpus, per run</text>
+    <text x="316" y="264" font-size="11" fill="#52514e">checkpoints/  Wan · tok · AgiBot</text>
+    <text x="316" y="279" font-size="10.5" fill="#898781">frozen base weights, one-time</text>
+
+    <line x1="316" y1="293" x2="552" y2="293" stroke="#c3c2b7" stroke-width="0.8"/>
+
+    <text x="316" y="313" font-size="11" fill="#52514e">checkpoints-sync/&lt;job&gt;/</text>
+    <text x="316" y="328" font-size="10.5" fill="#898781">live training state, every 60 s</text>
+    <text x="316" y="347" font-size="11" fill="#52514e">lora-checkpoints/&lt;job&gt;/  ~220 MB</text>
+    <text x="316" y="364" font-size="11" fill="#52514e">output/&lt;job&gt;/model.tar.gz</text>
+
+    <line x1="316" y1="378" x2="552" y2="378" stroke="#c3c2b7" stroke-width="0.8"/>
+
+    <text x="316" y="398" font-size="12" font-weight="600" fill="#1c5cab">models/&lt;name&gt;-merged/</text>
+    <text x="316" y="414" font-size="10.5" fill="#52514e">servable · 24 shards · ~92 GB</text>
+
+    <line x1="316" y1="428" x2="552" y2="428" stroke="#c3c2b7" stroke-width="0.8"/>
+
+    <text x="316" y="448" font-size="11" fill="#52514e">eval-assets/</text>
+    <text x="316" y="463" font-size="10.5" fill="#898781">the 2 runner scripts you upload</text>
+    <text x="316" y="482" font-size="11" fill="#52514e">eval-results/&lt;arm&gt;/</text>
+    <text x="316" y="497" font-size="10.5" fill="#898781">per-dimension MSE + logs</text>
+
+    <text x="316" y="527" font-size="10" fill="#898781">One regional bucket: the stack, the</text>
+    <text x="316" y="540" font-size="10" fill="#898781">weights and every job share one</text>
+    <text x="316" y="553" font-size="10" fill="#898781">region, and s3_root lives inside it.</text>
+    <text x="316" y="571" font-size="10" fill="#898781">Nothing is fetched from HF at job time.</text>
+  </g>
+
+  <!-- ============ column 3: the SageMaker jobs (all disposable) ============ -->
+  <g>
+    <rect x="612" y="182" width="444" height="76" rx="8" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1.2"/>
+    <text x="630" y="206" font-size="13" font-weight="600" fill="#0b0b0b">1 · Smoke gate — SageMaker Training Job</text>
+    <text x="630" y="226" font-size="11.5" fill="#52514e">10 steps on the same image, data and hyperparameters as the real run</text>
+    <text x="630" y="246" font-size="11" fill="#1c5cab">a hard gate — train does not start unless it succeeds · ~25 min · ~$10</text>
+  </g>
+
+  <g>
+    <rect x="612" y="272" width="444" height="104" rx="8" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1.2"/>
+    <text x="630" y="296" font-size="13" font-weight="600" fill="#0b0b0b">2 · LoRA fine-tune — SageMaker Training Job, ml.g7e.24xlarge</text>
+    <text x="630" y="316" font-size="11.5" fill="#52514e">4× RTX PRO 6000 · torchrun · DeepSpeed ZeRO-2 · LoRA r4</text>
+    <text x="630" y="334" font-size="11.5" fill="#52514e">runs as the SageMaker execution role* · BYOC image pinned by digest</text>
+    <text x="630" y="358" font-size="11" fill="#1c5cab">1000 steps · train_loss 0.0957 (EC2 ref ≈ 0.096) · 4 h 11 m · ~$93</text>
+  </g>
+
+  <g>
+    <rect x="612" y="390" width="444" height="90" rx="8" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1.2"/>
+    <text x="630" y="414" font-size="13" font-weight="600" fill="#0b0b0b">3 · Merge job — same image, one-shot</text>
+    <text x="630" y="434" font-size="11.5" fill="#52514e">AgiBot base + LoRA deltas → merge_and_unload()</text>
+    <text x="630" y="452" font-size="11.5" fill="#52514e">boto3 multipart upload → models/&lt;name&gt;-merged/</text>
+    <text x="630" y="471" font-size="11" fill="#1c5cab">~15 min · ~$5 · aborts rather than overwrite an existing merge</text>
+  </g>
+
+  <g>
+    <rect x="612" y="494" width="444" height="90" rx="8" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1.2"/>
+    <text x="630" y="518" font-size="13" font-weight="600" fill="#0b0b0b">4 · Open-loop eval — SageMaker Training Job (optional)</text>
+    <text x="630" y="538" font-size="11.5" fill="#52514e">up to 3 checkpoints on one deterministic frame set, inference only</text>
+    <text x="630" y="556" font-size="11.5" fill="#52514e">reads eval-assets/ as a channel, writes eval-results/&lt;arm&gt;/</text>
+    <text x="630" y="575" font-size="11" fill="#1c5cab">merged checkpoint scored MSE 0.00106 vs the 0.00100 EC2 reference</text>
+  </g>
+
+  <!-- ============ arrows ============ -->
+  <!-- workstation -> S3 -->
+  <line x1="256" y1="420" x2="292" y2="420" stroke="#2a78d6" stroke-width="1.6" marker-end="url(#arrowBlue)"/>
+
+  <!-- S3 <-> smoke -->
+  <line x1="568" y1="214" x2="604" y2="214" stroke="#2a78d6" stroke-width="1.6" marker-end="url(#arrowBlue)"/>
+  <line x1="604" y1="240" x2="568" y2="240" stroke="#898781" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- S3 <-> train -->
+  <line x1="568" y1="304" x2="604" y2="304" stroke="#2a78d6" stroke-width="1.6" marker-end="url(#arrowBlue)"/>
+  <line x1="604" y1="344" x2="568" y2="344" stroke="#898781" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- S3 <-> merge -->
+  <line x1="568" y1="422" x2="604" y2="422" stroke="#2a78d6" stroke-width="1.6" marker-end="url(#arrowBlue)"/>
+  <line x1="604" y1="452" x2="568" y2="452" stroke="#898781" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- S3 <-> eval -->
+  <line x1="568" y1="526" x2="604" y2="526" stroke="#2a78d6" stroke-width="1.6" marker-end="url(#arrowBlue)"/>
+  <line x1="604" y1="556" x2="568" y2="556" stroke="#898781" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- footnotes -->
+  <text x="24" y="616" font-size="11" fill="#898781">The merge is mandatory before you serve or evaluate: the repo's naive load_lora composes LoRA deltas onto raw Wan2.1 instead of the DreamZero-AgiBot</text>
+  <text x="24" y="632" font-size="11" fill="#898781">base — measured 9.9× worse open-loop MSE than the correct composition, and it raises no error while doing it (see the A/B chart).</text>
+  <text x="24" y="654" font-size="11" fill="#898781">Serving is bring-your-own: this sample ships no endpoint and no hosting layer. inference/predict.py runs a merged checkpoint on any GPU host with 80 GB+ VRAM.</text>
+
+  <!-- legend -->
+  <line x1="24" y1="678" x2="48" y2="678" stroke="#2a78d6" stroke-width="1.6" marker-end="url(#arrowBlue)"/>
+  <text x="54" y="682" font-size="10" fill="#52514e">S3 into a job (input channels)</text>
+  <line x1="234" y1="678" x2="258" y2="678" stroke="#898781" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="264" y="682" font-size="10" fill="#52514e">a job writing back to S3</text>
+  <text x="430" y="682" font-size="10" fill="#52514e">* provisioned once by cdk deploy</text>
+</svg>

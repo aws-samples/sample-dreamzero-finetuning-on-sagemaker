@@ -1,0 +1,119 @@
+This sample includes material derived from third-party projects, listed below.
+The MIT-0 license in LICENSE applies only to the original code in this
+repository; the files listed here remain under their original licenses.
+
+Every derived file below is covered by the Apache License, Version 2.0. Section
+4(a) of that license requires a *copy* of it to accompany any distribution of a
+derivative work, so a verbatim copy is included in this repository at
+LICENSE-Apache-2.0 — the canonical text as published by the Apache Software
+Foundation, SHA-256:
+
+  cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+
+The apache.org URLs below are conveniences, not the copy.
+
+--------------------------------------------------------------------------------
+
+NVIDIA DreamZero
+https://github.com/dreamzero0/dreamzero
+Copyright (c) 2025 NVIDIA Corporation. All rights reserved.
+Licensed under the Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0)
+
+Files derived from this project:
+  - evaluation/open_loop_eval.py  (derived from scripts/open_loop_yam.py at
+    commit ab790c1; modifications are noted in the file header and are
+    Copyright Amazon.com, Inc. or its affiliates, contributed under the same
+    Apache License, Version 2.0)
+  - docker/patches/0001-rank-worker-shard-shuffle-seed.patch and
+    docker/patches/0002-uniform-full-chunk-video-sampling.patch  (modify
+    groot/vla/data/dataset/lerobot_sharded.py at commit ab790c1)
+  - docker/patches/0003-batch-broadcast-has-real-action.patch  (modifies
+    groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py at
+    commit ab790c1)
+    The three patch files contain excerpts of DreamZero source under its
+    Apache License, Version 2.0; the modifications they introduce are
+    Copyright Amazon.com, Inc. or its affiliates, contributed under the same
+    license. docker/Dockerfile applies them to the cloned repository at
+    container build time.
+
+In addition, at container build time (docker/Dockerfile) and at dataset-prep
+time (pipeline/prep_dataset.py) this sample clones and runs the DreamZero
+repository itself, modified only by the patches listed above, under its
+Apache-2.0 license.
+
+--------------------------------------------------------------------------------
+
+ARTIFACTS DOWNLOADED AT RUN TIME
+
+None of the following are redistributed by this repository. The pipeline
+downloads them into your own AWS account, at the revision it pins, and they
+remain under their owners' licenses. Verify each against your own use case.
+
+Every commit id and tag below identifies a revision of the upstream project
+named beside it, in that project's own repository. None of them refer to this
+repository's history.
+
+Model weights and tokenizer (pipeline/stage_base_assets.py):
+
+  GEAR-Dreams/DreamZero-AgiBot, commit a8e1084
+  https://huggingface.co/GEAR-Dreams/DreamZero-AgiBot
+  Apache License, Version 2.0 — the base weights this pipeline fine-tunes.
+
+  Wan-AI/Wan2.1-I2V-14B-480P, commit 6b73f84
+  https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-480P
+  Apache License, Version 2.0 — video-diffusion backbone, VAE, T5 and CLIP
+  encoders.
+
+  google/umt5-xxl, commit 66cb9e7
+  https://huggingface.co/google/umt5-xxl
+  Apache License, Version 2.0 — tokenizer files only (spiece.model and json;
+  the allow_patterns in stage_base_assets.py exclude all model weights).
+
+Datasets (pipeline/run_pipeline.py, only when you point it at them):
+
+  lerobot/aloha_static_screw_driver, tag v2.1
+  https://huggingface.co/datasets/lerobot/aloha_static_screw_driver
+  MIT License — the demo dataset used by the shipped default configuration.
+
+  GEAR-Dreams/DreamZero-DROID-Data
+  https://huggingface.co/datasets/GEAR-Dreams/DreamZero-DROID-Data
+  NO LICENSE DECLARED. This dataset publishes no license metadata, no dataset
+  card and no LICENSE file, so no permission is granted by default. It is not a
+  default in this repository; it is downloaded only if you explicitly pass it
+  to --hf-dataset, as the README's Isaac Sim section describes. Clear your
+  intended use with the publisher before relying on any checkpoint trained on
+  it.
+
+Container base image (docker/Dockerfile):
+
+  Amazon SageMaker Deep Learning Container, PyTorch 2.8
+  tag 2.8.0-gpu-py312-cu129-ubuntu22.04-sagemaker
+  Not open source. Use is governed by the AWS Customer Agreement and the NVIDIA
+  CUDA EULA; the components it bundles remain under their own licenses
+  (including PyTorch under BSD-3-Clause, Ubuntu distribution packages under
+  their respective licenses, and CUDA/cuDNN under NVIDIA's proprietary terms).
+
+Python dependencies installed into that image:
+
+  docker/Dockerfile installs DreamZero with `pip install -e .`, which resolves
+  the dependency set declared in the upstream project's pyproject.toml. That
+  set is not uniformly permissive: it includes packages under GPL-3.0 (PyQt6,
+  pyttsx3), LGPL-2.1 (pygame) and NVIDIA's proprietary terms (tensorrt). None
+  of them is used by the training, evaluation or inference code paths in this
+  repository.
+
+  The image is built by CodeBuild into the deploying account's own ECR
+  repository (cdk/dreamzero_pipeline/pipeline_stack.py) and this repository
+  never publishes a prebuilt image, so no copyleft distribution obligation is
+  triggered by using this sample as shipped. If you redistribute the built
+  image, the GPL-3.0 packages carry source-offer obligations and you must
+  satisfy them or remove those packages first.
+
+Simulation evaluation (referenced in documentation only):
+
+  arhanjain/sim-evals
+  https://github.com/arhanjain/sim-evals
+  NO LICENSE DECLARED. The README's Isaac Sim section links to this project as
+  a closed-loop evaluation option. No code path in this repository clones,
+  vendors, installs or invokes it, and no part of it is included here.

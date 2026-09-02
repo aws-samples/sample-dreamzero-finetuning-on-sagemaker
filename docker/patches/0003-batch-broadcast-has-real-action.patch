@@ -1,0 +1,17 @@
+diff --git a/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py b/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py
+index b7cd806..c9ea822 100644
+--- a/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py
++++ b/groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py
+@@ -792,7 +792,11 @@ class WANPolicyHead(ActionHead):
+                 action_loss_per_sample = torch.nn.functional.mse_loss(
+                     action_noise_pred.float(), training_target_action.float(), reduction='none'
+                 ) * action_mask  # shape: [B, ...]
+-                action_loss_per_sample = has_real_action[:, None].float() * action_loss_per_sample  # apply has_real_action
++                # has_real_action is (B,); the loss is (B, T, D). [:, None] gives
++                # (B, 1), which broadcasts from the right against (T, D) -- fine at
++                # B=1 (both dims 1), but at B>1 it is a hard shape error (B vs T).
++                # (B, 1, 1) broadcasts correctly for any batch size.
++                action_loss_per_sample = has_real_action[:, None, None].float() * action_loss_per_sample  # apply has_real_action
+                 weight_action = action_loss_per_sample.mean(dim=2) * self.scheduler.training_weight(
+                     timestep_action.flatten(0, 1),
+                 ).unflatten(0, (noise_action.shape[0], noise_action.shape[1])).to(self._device)
