@@ -31,7 +31,7 @@ app-id value and rewrites ``/`` to ``-``, so the token would arrive as
 ``AWSSOLUTION-<id>-<version>`` and match nothing. ``user_agent_extra`` is
 passed through verbatim. There is no environment variable or shared-config key
 for ``user_agent_extra``, which is why plain ``aws`` CLI invocations (the
-container sync loops, the image-build buildspec) cannot be attributed at all —
+image-build buildspec, any CLI use inside a container) cannot be attributed at all —
 see pipeline/README.md.
 
 Failure behaviour is deliberately asymmetric. A missing or malformed config

@@ -6,12 +6,12 @@
 # Prefer the stack's CodeBuild image factory instead (no local Docker, no
 # ~18GB upload, and it publishes the digest-pinned URI to SSM):
 #   aws codebuild start-build --project-name <project>-image-build \
-#       --environment-variables-override name=IMAGE_TAG,value=v11,type=PLAINTEXT
+#       --environment-variables-override name=IMAGE_TAG,value=v13,type=PLAINTEXT
 # This script remains for offline iteration on the Dockerfile.
-# Usage: bash build_and_push.sh [tag]   (default: v11)
+# Usage: bash build_and_push.sh [tag]   (default: v13)
 set -euo pipefail
 
-TAG=${1:-v11}
+TAG=${1:-v13}
 DLC_ACCOUNT=763104351884   # AWS public Deep Learning Containers registry
 
 cd "$(dirname "$0")"

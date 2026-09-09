@@ -30,6 +30,11 @@ docker run --rm --entrypoint bash "$IMG" -c \
 | Packages with advisories | **7** |
 | Unique advisories | **33** |
 
+The shipped `v13` image differs from the scanned `v11` by `docker/patches/0004` (a
+source patch applied to the upstream clone before `pip install`) and a rewritten
+training entrypoint. Neither adds a package or changes a version, so this
+inventory applies to `v13` unchanged.
+
 `pip-audit` exits non-zero when it finds anything, so a `0` exit here would mean
 a clean image, not a successful scan. It exited `1`.
 

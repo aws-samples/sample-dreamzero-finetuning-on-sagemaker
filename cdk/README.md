@@ -26,18 +26,20 @@ from the stack outputs.
 
 ## The image factory
 
-The Dockerfile compiles flash-attn from source, and the finished image is
+The Dockerfile installs flash-attn (a prebuilt wheel when one matches, compiled
+from source otherwise), and the finished image is
 ~18GB of compressed layers in ECR (~50GB unpacked on a host), so building it in
 CodeBuild (privileged `BUILD_GENERAL1_2XLARGE`, 4h timeout) next to ECR beats
 building on a laptop — the push never leaves AWS. That compute is billed:
-`BUILD_GENERAL1_2XLARGE` is $0.20/build-minute in us-east-1, so budget ~$12 for
-the ~1h build, once per region. The `docker/` directory is
+`BUILD_GENERAL1_2XLARGE` is $0.20/build-minute in us-east-1; a build takes 8–12
+minutes once CodeBuild assigns a host (the queue itself can add anything from
+nothing to an hour), so budget a few dollars per build, once per region. The `docker/` directory is
 uploaded as an S3 asset at deploy time, so a build always sees the deployed
 revision's Dockerfile.
 
 **`cdk deploy` kicks the build off, but does not wait for it.** A one-call
 custom resource fires `codebuild:StartBuild` during the deploy, then the
-deploy returns while the ~1h build runs — blocking on it would hit
+deploy returns while the build runs — blocking on it would hit
 CloudFormation's custom-resource timeout, and a build failure would roll the
 whole stack back. The kickoff re-fires only when the `docker/` asset content
 or `project_config.json`'s `image.tag` changes; an unchanged re-deploy starts
@@ -46,7 +48,7 @@ without a deploy):
 
 ```bash
 aws codebuild start-build --project-name dreamzero-image-build \
-    --environment-variables-override name=IMAGE_TAG,value=v11,type=PLAINTEXT
+    --environment-variables-override name=IMAGE_TAG,value=v13,type=PLAINTEXT
 ```
 
 The build layer-caches from the most recently pushed tag (override with
@@ -136,7 +138,7 @@ python3 generate_pipeline_config.py --stack dreamzero-pipeline-infra
 
 # local-Docker alternative to the CodeBuild factory — needs the generated
 # pipeline/pipeline_config.json first:
-bash ../docker/build_and_push.sh v11
+bash ../docker/build_and_push.sh v13
 ```
 
 ## How the config reaches the pipeline
@@ -154,7 +156,7 @@ See `pipeline/pipeline_config.example.json` for the shape.
 
 ## Notes
 
-- **Bucket is `RETAIN`**: `cdk destroy` leaves the bucket (and your ~500GB of
+- **Bucket is `RETAIN`**: `cdk destroy` leaves the bucket (and your ~230GB of
   weights + checkpoints + trained models) intact. Delete it manually only when you mean to.
   Because the bucket is CDK-named, a later re-deploy creates a *new* one and
   orphans the old — move or delete the data deliberately.

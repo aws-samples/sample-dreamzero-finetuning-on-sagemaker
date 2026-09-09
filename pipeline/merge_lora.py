@@ -27,9 +27,9 @@ from groot.vla.model.dreamzero.base_vla import VLA, VLAConfig
 CKPT = os.environ.get("LORA_DIR", "/opt/ml/lora")
 AGIBOT = os.environ.get("AGIBOT_DIR", "/opt/ml/input/data/agibot")
 OUT = os.environ.get("MERGED_DIR", "/opt/ml/merged")
-# Upload directly from the script: a one-shot ~92GB burst into
-# /opt/ml/checkpoints at job end overwhelms the CheckpointConfig sync agent
-# (job dies with InternalServerError after "MERGE COMPLETE").
+# Upload directly from the script rather than leaving a one-shot ~92GB burst
+# in /opt/ml/checkpoints for the job's teardown to carry: the merge's success
+# must not depend on anything that runs after "MERGE COMPLETE".
 MERGED_S3_URI = os.environ.get("MERGED_S3_URI", "")
 
 # config from OUR checkpoint, but with TRAINING-time flags

@@ -28,7 +28,7 @@ docker/ asset content or the configured image tag (project_config.json
 image.tag) changes. Builds can still be started by hand — see cdk/README.md:
 
   aws codebuild start-build --project-name <project>-image-build \
-      --environment-variables-override name=IMAGE_TAG,value=v11,type=PLAINTEXT
+      --environment-variables-override name=IMAGE_TAG,value=v13,type=PLAINTEXT
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ from constructs import Construct
 S3_PREFIXES = [
     "datasets/",          # converted GEAR/yam datasets
     "checkpoints/",       # frozen base weights (Wan, tokenizer, AgiBot)
-    "checkpoints-sync/",  # live training-state sync (entrypoint sync loop)
+    "checkpoints-sync/",  # CheckpointConfig mirror of each training job's saves
     "lora-checkpoints/",  # raw LoRA output (archival)
     "models/",            # servable merged checkpoints
     "output/",            # per-job model.tar.gz
@@ -72,7 +72,7 @@ DLC_ACCOUNT = "763104351884"
 
 # Fallback tag when project_config.json carries no image.tag (app.py resolves
 # it and passes image_tag=). Keep in step with docker/build_and_push.sh.
-DEFAULT_IMAGE_TAG = "v11"
+DEFAULT_IMAGE_TAG = "v13"
 
 
 class DreamZeroPipelineStack(Stack):
@@ -83,7 +83,7 @@ class DreamZeroPipelineStack(Stack):
 
         # --- ECR: the BYOC image ---
         # Scanner notes (checkov): tags stay MUTABLE so an image build (the
-        # CodeBuild factory below, or `build_and_push.sh v11` locally) can be
+        # CodeBuild factory below, or `build_and_push.sh v13` locally) can be
         # re-run while iterating on the image; encryption is the ECR
         # default (AES-256) — switch to KMS if your org requires CMKs.
         repo = ecr.Repository(
@@ -99,7 +99,7 @@ class DreamZeroPipelineStack(Stack):
         )
 
         # --- S3: the system of record ---
-        # Bucket holds ~500GB after one full pipeline pass at the shipped
+        # Bucket holds ~230GB after one full pipeline pass at the shipped
         # defaults (base weights + datasets + checkpoints + merged models —
         # see the Costs section of the root README). RETAIN on delete: these
         # artifacts must outlive any single stack (S3-first policy).
@@ -114,8 +114,8 @@ class DreamZeroPipelineStack(Stack):
             # cost with no rollback value. Enable server access logging /
             # versioning here if your compliance baseline requires them.
             versioned=False,
-            # The only way to bound orphaned multipart uploads. Every checkpoint
-            # shard is an 85 GiB multipart, and a job that is killed mid-upload
+            # The only way to bound orphaned multipart uploads. Checkpoint and
+            # merged-model shards are multi-GiB multiparts, and a job that is killed mid-upload
             # leaves its parts behind: SIGKILL cannot be caught, so no amount of
             # care in the entrypoint can abort them. Orphaned parts are BILLED as
             # storage and appear in neither `aws s3 ls` nor ListObjectsV2, so they
@@ -240,7 +240,7 @@ class DreamZeroPipelineStack(Stack):
                 # from project_config.json image.tag (via app.py); override
                 # per build:  aws codebuild start-build ...
                 #   --environment-variables-override
-                #     name=IMAGE_TAG,value=v11,type=PLAINTEXT
+                #     name=IMAGE_TAG,value=v13,type=PLAINTEXT
                 "IMAGE_TAG": codebuild.BuildEnvironmentVariable(
                     value=image_tag),
                 # "auto" → the buildspec caches from the most recently pushed

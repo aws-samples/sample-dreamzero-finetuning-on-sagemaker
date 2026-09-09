@@ -5,7 +5,7 @@
   "region": "us-east-1",
   "account": "<your-account-id>",
   "ecr_repo_uri": "<account>.dkr.ecr.<region>.amazonaws.com/dreamzero-sagemaker-training",
-  "image_uri": "<account>.dkr.ecr.<region>.amazonaws.com/dreamzero-sagemaker-training:v11",
+  "image_uri": "<account>.dkr.ecr.<region>.amazonaws.com/dreamzero-sagemaker-training:v13",
   "sagemaker_role_arn": "arn:aws:iam::<account>:role/<stack>-SageMakerExecutionRole-<suffix>",
   "serving_instance_profile": "<stack>-ServingInstanceProfile-<suffix>",
   "s3_root": "s3://<your-cdk-created-bucket>/sagemaker",
