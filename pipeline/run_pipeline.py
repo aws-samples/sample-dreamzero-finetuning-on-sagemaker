@@ -187,31 +187,16 @@ def launch_training(name, dataset_s3, fps, max_steps, save_steps, compute,
             channel("agibot", f"{S3}/checkpoints/DreamZero-AgiBot/"),
         ],
         "OutputDataConfig": {"S3OutputPath": f"{S3}/output/"},
-        # Deliberately NO CheckpointConfig. SageMaker's checkpoint sync agent
-        # can fail the whole job with a generic InternalServerError whenever a
-        # multi-GB save burst lands in its LocalPath — observed both at a
-        # mid-run checkpoint save (killing an otherwise healthy multi-day run
-        # at its first save) and at teardown after training succeeded, 4/4 in
-        # this account (eu-central-1, ml.g7e.48xlarge, 2026-08-18/19), while a
-        # byte-identical job without CheckpointConfig Completed.
-        #
-        # AWS documents the same symptom and prescribes this workaround:
-        # https://docs.aws.amazon.com/sagemaker/latest/dg/distributed-troubleshooting-model-parallel.html
-        # § "Saving Checkpoints". Quote it honestly: AWS says the error "*could*
-        # be caused by a SageMaker AI limitation while uploading the local
-        # checkpoint to Amazon S3 during training", and that page is archived
-        # SMP-v1 material whose remedy snippet gates on smp.local_rank(),
-        # whereas this recipe uses DeepSpeed ZeRO-2 and never SMP. So the doc
-        # is a matching symptom plus a sanctioned workaround, not a ruling on
-        # this configuration — the 4/4 above is the actual evidence, and no
-        # published size limit exists to appeal to.
-        #
-        # The entrypoint (image v9+) owns BOTH directions of the sync: same
-        # checkpoints-sync/ layout — see checkpoint_s3_uri below — a 60s upload
-        # loop for live loss streaming and crash survival, a verified final
-        # sync BEFORE exit, and (image v10+) a restore of the newest complete
-        # checkpoint at start-up so a managed-spot relaunch resumes instead of
-        # silently retraining from step 0 over its own recovery point.
+        # SageMaker mirrors LocalPath to S3 while the job runs and, on a
+        # managed-spot relaunch of this same spec, restores the prefix before
+        # the container starts; upstream's trainer then resumes from the
+        # highest checkpoint-*/ it finds. Checkpoints are a few GB each
+        # (docker/patches/0004), so this is cheap. The entrypoint adds a
+        # completeness guard in front of the trainer so a checkpoint torn by a
+        # mid-save reclaim is discarded rather than resumed from. The same
+        # prefix is what scan_synced_checkpoints and the merge recovery read.
+        "CheckpointConfig": {"S3Uri": f"{S3}/checkpoints-sync/{job}/",
+                             "LocalPath": "/opt/ml/checkpoints"},
         "ResourceConfig": {"InstanceType": compute["instance_type"],
                            "InstanceCount": 1,
                            "VolumeSizeInGB": int(compute["volume_gb"])},
@@ -227,20 +212,15 @@ def launch_training(name, dataset_s3, fps, max_steps, save_steps, compute,
             # which upstream data recipe the entrypoint runs: "yam" (GEAR/yam
             # bimanual, the default) or "droid" (single-arm Franka DROID)
             "recipe": recipe,
-            # where the entrypoint's own sync loop mirrors /opt/ml checkpoints
-            # (60s cadence + verified final sync). Same layout CheckpointConfig
-            # used to produce, so scan_synced_checkpoints and the merge
-            # recovery path read it unchanged. Requires image v9+.
-            "checkpoint_s3_uri": f"{S3}/checkpoints-sync/{job}/",
         },
         "Tags": job_tags(CFG),
     }
     if spot:
         # Managed spot is OPT-IN (--spot), never the default. Two reasons the
         # default stays on-demand: a reclaim can leave the job queued for hours
-        # (measured: 6.5 h of "Insufficient capacity error from EC2 while
-        # launching instances, retrying!" after a real p5en reclaim), which reads
-        # as a broken sample to a first-time user; and the savings only pay off
+        # ("Insufficient capacity error from EC2 while launching instances,
+        # retrying!" in the job log until the pool has room), which reads as a
+        # broken sample to a first-time user; and the savings only pay off
         # over a long run, not over the 1000-step demo.
         #
         # MaxWaitTimeInSeconds is REQUIRED with EnableManagedSpotTraining and
@@ -338,8 +318,7 @@ def s3_root_key():
 def scan_synced_checkpoints(train_job, s3cli, root_key):
     """Enumerate what actually reached checkpoints-sync/ for a training job.
 
-    The entrypoint's sync loop writes this prefix (legacy jobs launched with
-    CheckpointConfig share the exact same layout).
+    SageMaker's CheckpointConfig agent writes this prefix as the trainer saves.
 
     Returns (complete, weights, cfg_files, root_files). `complete` is the sorted
     list of steps whose checkpoint-<N>/ holds BOTH config.json and
@@ -368,16 +347,14 @@ def finalization_only_failure(train_job, s3cli, max_steps):
     """Build a wait_for_job() predicate that tolerates a post-training failure.
 
     SageMaker can fail a job *after* the container has exited 0 (see
-    pipeline/README.md). Root cause was CheckpointConfig's sync agent choking
-    on a multi-GB save burst; launch_training no longer sets it, so this
-    should not fire on image v9+ jobs — it stays as belt-and-suspenders and
-    for jobs launched by older revisions. No model.tar.gz is written in
-    that failure mode, but the LoRA weights are already in checkpoints-sync/
-    and stage_lora_for_merge recovers them — so the pipeline should continue to
-    merge rather than drop a finished multi-day run on the floor. (On a legacy
-    job the same agent could also kill the run at a MID-RUN save; that case
-    correctly aborts here — checkpoint-<max_steps> is absent — and the log
-    prints which earlier checkpoints are mergeable.)
+    pipeline/README.md). It is rare, but it is the one failure the pipeline
+    must not turn into a lost run. No
+    model.tar.gz is written in that failure mode, but the LoRA weights are
+    already in checkpoints-sync/ and stage_lora_for_merge recovers them — so the
+    pipeline should continue to merge rather than drop a finished multi-day run
+    on the floor. (A job that dies at a MID-RUN save correctly aborts here —
+    checkpoint-<max_steps> is absent — and the log prints which earlier
+    checkpoints are mergeable.)
 
     The discriminator is the *final* checkpoint, not merely "some checkpoint":
     a job that died at step 3000 also leaves complete earlier checkpoints, and
@@ -412,8 +389,8 @@ def stage_lora_from_checkpoint_sync(train_job, s3cli, root_key):
     merge_lora.py needs config.json, model.safetensors, experiment_cfg/ and
     loss_log.jsonl, and all four are in checkpoints-sync/<job>/ independently of
     model.tar.gz. The trainer writes a checkpoint's LoRA weights *before* its
-    DeepSpeed resume states, so when a mid-run death (or, on legacy
-    CheckpointConfig jobs, a finalization failure) truncates the sync it
+    DeepSpeed resume states, so when a mid-run death (or a finalization
+    failure on a job whose sync was still draining) truncates the sync it
     is the resume states that are lost, not these. Server-side copies only: the
     safetensors is a few hundred MB and never needs to touch this machine.
 
@@ -597,61 +574,9 @@ def preflight(args, proj, start, stop_idx):
             img = get_client("ecr", session=sess).describe_images(
                 repositoryName=repo_name, imageIds=[image_id]
             )["imageDetails"][0]
-            # Launcher/image pairing: this launcher relies on the v9+
-            # entrypoint syncing checkpoints itself (checkpoint_s3_uri). A
-            # pre-v9 image would write checkpoints to the unmounted
-            # /opt/ml/checkpoints — the small root overlay — and die with
-            # ENOSPC at the first multi-GB save, hours in. Tags are the only
-            # version signal ECR has; a digest-pinned URI still resolves to
-            # its tags here.
-            vers = [int(m.group(1)) for t in (img.get("imageTags") or [])
-                    if (m := re.fullmatch(r"v(\d+)", t))]
-            if vers and max(vers) < 9:
-                row("fail", "training image",
-                    f"{repo_name}{shown} is v{max(vers)}, but this launcher "
-                    f"needs image v9+ (the entrypoint owns checkpoint sync; "
-                    f"a pre-v9 image fills the root overlay and dies with "
-                    f"ENOSPC mid-run) — build/push v11 and update image_uri")
-            elif getattr(args, "spot", False) and vers and max(vers) < 11:
-                # --spot turns the version advisory into a hard gate. On demand a
-                # missing restore is unreachable (SageMaker never relaunches an
-                # on-demand job); with managed spot it is the difference between
-                # resuming and silently overwriting the recovery point you would
-                # have resumed from, in a bucket with no versioning.
-                row("fail", "training image",
-                    f"{repo_name}{shown} is v{max(vers)}, and --spot needs v11+. "
-                    f"A reclaim relaunches this same job spec into the same "
-                    f"checkpoint prefix: v9 has no restore at all, and v10 has "
-                    f"three holes (a staged ckpt channel reports SUCCESS having "
-                    f"trained nothing, a bucket-root URI never finds its mirror, "
-                    f"an all-rejected prefix looks empty). Build/push v11 and "
-                    f"update image_uri, or drop --spot")
-            elif vers and max(vers) < 11:
-                # Not fatal for an on-demand run: SageMaker never relaunches
-                # one, so the restore path is unreachable either way. It matters
-                # for managed spot, which this launcher does not use but ad-hoc
-                # submitters do. v9 is the dangerous one — a relaunch retrains
-                # from step 0 AND re-uploads over its own checkpoint keys in a
-                # non-versioned bucket, destroying the recovery point (measured
-                # 2026-08-30: ~3,900 steps / ~$480 lost). v10 restores, but
-                # carries three holes v11 closes: a `ckpt` channel staged from a
-                # previous run's output prefix makes the job report SUCCESS
-                # having trained nothing, a bucket-root checkpoint URI never
-                # finds its own mirror, and an all-rejected prefix is logged as
-                # if it were empty.
-                row("warn", "training image",
-                    f"{repo_name}{shown} is v{max(vers)} — usable on demand, but "
-                    f"for managed spot prefer v11+: v10+ restores the newest "
-                    f"complete checkpoint at start-up so a relaunch resumes "
-                    f"instead of retraining from step 0 over its own recovery "
-                    f"point, and v11 fixes three ways that restore can still "
-                    f"silently do the wrong thing"
-                    + (" — v9 has no restore at all, do NOT spot it"
-                       if max(vers) < 10 else ""))
-            else:
-                row("ok", "training image",
-                    f"{repo_name}{shown} ({img['imageSizeInBytes'] / 2**30:.1f} GiB, "
-                    f"pushed {img['imagePushedAt']:%Y-%m-%d})")
+            row("ok", "training image",
+                f"{repo_name}{shown} ({img['imageSizeInBytes'] / 2**30:.1f} GiB, "
+                f"pushed {img['imagePushedAt']:%Y-%m-%d})")
         except Exception:
             row("fail", "training image",
                 f"{repo_name}{shown} not in ECR — build and push it: "
@@ -763,11 +688,11 @@ def main():
     ap.add_argument("--spot", action="store_true",
                     help="run the TRAIN stage on managed spot (not the smoke "
                          "gate or the merge). Sets EnableManagedSpotTraining "
-                         "and MaxWaitTimeInSeconds. Needs image v11+: on a "
-                         "reclaim SageMaker relaunches the same job spec, and "
-                         "only v11+ restores the newest complete checkpoint at "
-                         "start-up instead of retraining from step 0 over its "
-                         "own recovery point. Expect queueing — a reclaimed job "
+                         "and MaxWaitTimeInSeconds. On a reclaim SageMaker "
+                         "relaunches the same job spec, and the entrypoint "
+                         "restores the newest complete checkpoint at start-up "
+                         "instead of retraining from step 0 over its own "
+                         "recovery point. Expect queueing — a reclaimed job "
                          "can sit in Starting for hours waiting for capacity, "
                          "billed nothing while it waits")
     ap.add_argument("--skip-smoke", action="store_true")

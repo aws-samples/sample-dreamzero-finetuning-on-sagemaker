@@ -1,5 +1,5 @@
 {
-  "_comment": "Per-run knobs, most-edited first. Account infra lives in pipeline/pipeline_config.json (CDK-generated); per-robot semantics in pipeline/configs/*.yaml. CLI flags override anything here. The two blocks NOT to edit per run are 'solution' and 'image' (see their own comments). project_config.openarms.json is a second worked example — a 16-dim bimanual arm on ml.g7e.48xlarge — usable with --project-config, and project_config.openarms.mix.json is a third: the same arm trained on a pooled real+sim corpus, which needs a PRE-PREPPED dataset (its embodiment config sets format: gear so the pipeline does not recompute normalisation stats). Neither ships the dataset itself; read the dataset._comment in each before using it.",
+  "_comment": "Per-run knobs, most-edited first. Account infra lives in pipeline/pipeline_config.json (CDK-generated); per-robot semantics in pipeline/configs/*.yaml. CLI flags override anything here. The two blocks NOT to edit per run are 'solution' and 'image' (see their own comments). project_config.openarms.json is a second worked example — a 16-dim bimanual arm on ml.g7e.48xlarge — usable with --project-config. It does not ship the dataset itself; read its dataset._comment before using it.",
 
   "dataset": {
     "_comment": "revision v2.1 = the LeRobot-v2.1-format branch of the HF repo (main may be v3-format). Local data goes in the repo's dataset/ folder (gitignored): set source=local and local_path=dataset/<your_dataset>. HF downloads land in <cache_dir>/<run name>/; relative paths resolve against the repo root. See dataset/README.md.",
@@ -27,7 +27,7 @@
   },
 
   "compute": {
-    "_comment": "Per-stage instance settings. volume_gb is inert on instance types with NVMe instance store (g7e gets its full instance store regardless); it only binds on EBS-only types, where 119GiB of input channels plus (save_total_limit + 1) x ~89GiB of checkpoints needs >=900. Runtime caps are not billed; only actual usage is.",
+    "_comment": "Per-stage instance settings. volume_gb is inert on instance types with NVMe instance store (g7e gets its full instance store regardless); it only binds on EBS-only types, where 119GiB of input channels plus (save_total_limit + 1) x ~3.6GiB of checkpoints fits easily in the 500 below (checkpoints carry the LoRA weights and optimizer states only — docker/patches/0004 keeps the frozen base out of them). Runtime caps are not billed; only actual usage is.",
     "smoke": { "instance_type": "ml.g7e.24xlarge", "volume_gb": 500, "max_runtime_hours": 3, "steps": 10 },
     "train": { "instance_type": "ml.g7e.24xlarge", "volume_gb": 500, "max_runtime_hours": 12 },
     "merge": { "instance_type": "ml.g7e.24xlarge", "volume_gb": 500, "max_runtime_hours": 3 },
@@ -42,7 +42,7 @@
 
   "image": {
     "_comment": "ECR tag the deploy-time image build pushes. Read from THIS file only (cdk/app.py resolves it and ignores --project-config) — see cdk/README.md.",
-    "tag": "v11"
+    "tag": "v13"
   },
 
   "solution": {

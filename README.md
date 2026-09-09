@@ -15,23 +15,24 @@ reference open-loop accuracy (MSE 0.00106 vs 0.00100).
 
 Read the story behind this sample — what we measured, and the failure modes
 that only showed up with real money on the line — on [AWS Builder
-Center](https://builder.aws.com/content/3Im0ezyNtOji0HQBCTwqwgkQ9VI/fine-tuning-a-nvidias-dreamzero-a-14b-world-action-model-on-amazon-sagemaker-what-it-actually-takes).
+Center](https://builder.aws.com/content/3Im0ezyNtOji0HQBCTwqwgkQ9VI/fine-tuning-nvidias-dreamzero-a-14b-world-action-model-on-amazon-sagemaker-what-it-actually-takes).
 
 ## What a first run costs and how long it takes
 
 | Phase | Wall clock | Cost |
 |---|---|---|
-| `cdk deploy` + the CodeBuild image build | ~1 h, in the background | ~$12 |
+| `cdk deploy` + the CodeBuild image build | ~10–15 min of build, in the background — plus however long CodeBuild queues for a host, which has ranged from 0 to over an hour | ~$3 |
 | `./setup.sh --stage-assets` — one-time base weights | ~1–2 h (~128 GB / 119 GiB, downloaded then uploaded) | ~$3/month to store |
 | Smoke job — 10 steps, the gate | ~25 min | ~$10 |
 | 1000-step fine-tune — the shipped default | **4 h 11 m** | ~$93 |
 | LoRA → base merge | ~15 min | ~$5 |
-| **First servable checkpoint** | **~6–7 h** | **~$120** |
+| **First servable checkpoint** | **~6–7 h** | **~$110** |
 
-The image build is not free: it runs on a privileged
-`BUILD_GENERAL1_2XLARGE`, which is **$0.20/build-minute** in us-east-1, and
-compiling flash-attn from source is what makes it take the hour. Budget ~$12 per
-build, once per region — not per run.
+The image build runs on a privileged `BUILD_GENERAL1_2XLARGE` at
+**$0.20/build-minute** in us-east-1; measured builds take 8–12 minutes once a
+host is assigned (flash-attn resolves to a prebuilt wheel for this CUDA/torch
+pair rather than compiling). Budget a few dollars per build, once per region —
+not per run.
 
 The first two rows are one-time per region, so a second run is the last three:
 about 5 hours. Costs are measured; of the durations, **4 h 11 m and the merge are
@@ -80,16 +81,17 @@ assets/      architecture diagram + measured result charts
   ```
 
   Quota is not capacity: an approved quota does not mean the region has the
-  instance, and **no free API tells you whether it does** —
+  instance, and **nothing tells you in advance whether it does** —
   `describe-capacity-block-offerings`, `run-instances --dry-run` and
-  spot-placement scores all answer a different question. The zero-cost probe
-  is a **submitted SageMaker training job**: it queues as `Pending` and bills
-  nothing until it gets hardware, so submit the smoke job *before* staging
-  ~128GB of weights into a region. Capacity is region-local — if one region is
-  dry, try another rather than waiting.
+  spot-placement scores all answer a different question, and a job that seats
+  now says nothing about one submitted an hour later. So stage the weights,
+  submit, and treat a long `Pending` as normal: it bills nothing until the job
+  gets hardware, and cancelling it to retry only loses your place. Capacity is
+  region-local — if one region stays dry, another may not be.
 
   `ml.p4de.24xlarge` (8× A100 80GB) is also validated with this image;
-  `ml.p5.48xlarge` meets the 80GB-per-GPU bar but has not been run. The
+  `ml.p5.48xlarge` (8× H100 80GB) has run this image as a managed-spot job,
+  including a checkpoint restore. The
   preflight reads the quota for whatever you configured, so a wrong request
   shows up before any money is spent.
 - AWS CLI v2 with working credentials for the target account
@@ -119,8 +121,8 @@ Three commands, on the shipped ALOHA demo dataset:
 ```bash
 export AWS_REGION=us-east-1 AWS_DEFAULT_REGION=us-east-1   # both; see below
 
-# 1. Infrastructure, once per region. Also kicks off the ~1h training-image
-#    build in CodeBuild, which runs in the background — the deploy returns.
+# 1. Infrastructure, once per region. Also kicks off the training-image build
+#    in CodeBuild (~15 min plus queueing), in the background — the deploy returns.
 npm install -g aws-cdk        # the CDK CLI (requirements.txt has only the library)
 cd cdk && python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt && cdk bootstrap && cdk deploy
@@ -419,12 +421,12 @@ Three other flags matter here:
 - **`--spot`** runs the **train stage only** on managed spot
   (`EnableManagedSpotTraining` plus the required `MaxWaitTimeInSeconds`, set to
   2× the runtime cap so a reclaimed job has room to queue). Off by default, and
-  the smoke gate and merge never use it. Preflight **refuses** `--spot` on an
-  image below v11, because a reclaim relaunches the same job spec into the same
-  checkpoint prefix — see [If a training job is
-  interrupted](#if-a-training-job-is-interrupted). Expect queueing: after a real
-  reclaim this recipe sat in `Starting` for 6.5 h waiting for capacity, billed
-  nothing while it waited.
+  the smoke gate and merge never use it. A reclaim relaunches the same job spec
+  into the same checkpoint prefix, which is why the entrypoint restores from
+  that prefix at start-up — see [If a training job is
+  interrupted](#if-a-training-job-is-interrupted). Expect queueing: a reclaimed
+  job can sit in `Starting` for hours waiting for capacity, billed nothing
+  while it waits.
 - **`--train-job <name>` together with `--start-at train` attaches** to a job
   that is *already running* rather than submitting another one: the driver
   waits on it, then merges. That is the correct response to a lost terminal on
@@ -445,31 +447,47 @@ read that before you serve anything.
 
 ### If a training job is interrupted
 
-The image mirrors `$OUT` to `checkpoints-sync/<job>/` every 60 seconds and, at
-start-up, **restores the newest *complete* checkpoint from that prefix back into
-`$OUT`** — so a job that starts again under the same name resumes instead of
-retraining from step 0. "Complete" is checked, not assumed: one optimizer shard
-per GPU on this instance, plus `latest`, `trainer_state.json` and `scheduler.pt`,
-with every size cross-checked against the S3 listing to catch a save that was
-mirrored mid-write.
+Every training job is submitted with `CheckpointConfig` pointing at
+`checkpoints-sync/<job>/`. SageMaker mirrors each save to S3 as the trainer
+writes it and, when a managed-spot job is reclaimed and relaunched, restores that
+prefix into the container before training starts; upstream's trainer then
+resumes from the highest `checkpoint-*/` it finds. Checkpoints are ~3.6 GB each
+(LoRA weights plus optimizer state — the frozen base is not saved), so a save
+reaches S3 in seconds.
+
+The entrypoint adds one guard in front of the trainer. A restored checkpoint is
+kept only if it is **complete**: one optimizer shard per GPU on this instance,
+`latest`, `trainer_state.json`, `scheduler.pt`, the adapter and its config,
+nothing zero-byte, and every size consistent with the run's other checkpoints.
+A checkpoint torn by a reclaim mid-save is deleted, so the trainer falls back to
+the previous one instead of dying in `torch.load` ten minutes into the relaunch.
+The guard also reads the newest checkpoint's `global_step`. If the run had
+already reached `max_steps` when it was reclaimed (a reclaim in the seconds
+between the last save and teardown), the finished weights are left in place and
+the trainer skips straight to staging them, instead of loading the model to run
+one extra step. If `max_steps` is *higher* than the checkpoint — the way to
+continue a finished run deliberately — the finished run's top-level
+`config.json` is removed, because upstream reads it as "model is ready, skip
+training" and would report SUCCESS having trained nothing.
 
 Two things worth being precise about:
 
-- **This launcher submits on-demand jobs, and SageMaker never relaunches one.**
-  So on the shipped path the restore is a safety net you will not normally reach:
-  it matters if you submit with `EnableManagedSpotTraining` yourself, or point
-  `CKPT_S3_URI` at an earlier run's prefix to continue it.
+- **This launcher submits on-demand jobs unless you pass `--spot`, and
+  SageMaker never relaunches an on-demand job.** So on the shipped path the
+  restore is a safety net you will not normally reach. To *continue* a finished
+  run deliberately, submit the same spec with a higher `max_steps` and
+  `CheckpointConfig.S3Uri` pointing at the earlier run's prefix.
 - **It is not just a cost saver.** A same-name relaunch reuses the same prefix,
   and the bucket is not versioned, so a from-scratch attempt overwrites the
-  better-trained checkpoints it should have resumed from. That is why the restore
-  refuses to start when it cannot list the prefix, when its selector crashes, or
-  when a download arrives incomplete — a failed job costs minutes, and a silent
-  step-0 restart once destroyed ~$480 of training before this existed.
+  better-trained checkpoints it should have resumed from. That is why the guard
+  never fails open: if it cannot judge what was restored, it stops the job
+  rather than train from step 0 over a recovery point it cannot get back.
 
-Measured on a real spot reclaim: 26 files verified, resumed from step 7,500 in
-155 s. Requires image **v11+** (`project_config.json` → `image.tag`); v10 restores
-but has three known holes, and v9 has no restore at all — `run_pipeline.py`'s
-preflight warns you which one you are on.
+Measured on a 20-step managed-spot job that was reclaimed three times — once
+before its first save, once after `checkpoint-10`, once seconds after its final
+save: every relaunch resumed from the newest complete checkpoint, the last one
+skipped straight to staging the finished weights, and the job completed with
+its artifacts intact.
 
 ### Dry-run any of them first
 
@@ -674,7 +692,7 @@ At the shipped defaults:
 | Smoke job (10 steps, the gate) | ~$10 |
 | 1000-step fine-tune (4h11m) | ~$93 |
 | LoRA→base merge job | ~$5 |
-| S3 storage after one full pass (~500GB) | ~$11/month |
+| S3 storage after one full pass (~230GB) | ~$5/month |
 
 **Compute is linear in `training.max_steps`**, and the shipped 1000 is a demo
 default, not a recommendation. Scaling the *shipped* recipe linearly off its own
@@ -694,12 +712,17 @@ and merge unless you pass `--stop-after smoke`, and it never prompts.
 **Storage grows and never shrinks.** `save_total_limit=5` prunes the training
 container's local disk, but the S3 mirror is an `aws s3 sync` *without*
 `--delete` and the bucket has no lifecycle rule — so every checkpoint the
-trainer ever writes stays billable, at ~95GB each (the full base model
-dominates; the LoRA adapter itself is a fraction of a GB). The ~500GB above is
-one pass at the defaults: base weights ~128GB + one smoke checkpoint + two
-train checkpoints + the ~92GB merged output. Raising `max_steps` or lowering
-`save_steps` adds ~95GB per extra save. Once the merge job has succeeded, only
-the final checkpoint is worth keeping:
+trainer ever writes stays billable, at **~3.6GB each**: the ~0.46GB LoRA
+weights plus DeepSpeed's optimizer and trainable-parameter states. The frozen
+base model is *not* written into every checkpoint — upstream's trainer would
+do that (Transformers only excludes frozen parameters from DeepSpeed's resume
+state for PEFT models, and DreamZero injects LoRA itself), which made each
+checkpoint ~95GB; `docker/patches/0004` closes that gap, measured 88.7GiB →
+3.6GiB per save with resume intact. The ~230GB above is one pass at the
+defaults: base weights ~128GB + one smoke checkpoint + two train checkpoints +
+the ~92GB merged output. Raising `max_steps` or lowering `save_steps` adds
+~3.6GB per extra save. Once the merge job has succeeded, only the final
+checkpoint is worth keeping:
 
 ```bash
 # preview first; drop --dryrun once the output looks right
@@ -888,7 +911,7 @@ instead of CMKs, jobs running outside your VPC, mutable ECR tags — and the one
 worth reading even if you skip the rest:
 
 > The merge and eval jobs take their **entrypoint from S3**
-> (`run_pipeline.py:295`, `submit_eval_job.py:116`), referenced by key on an
+> (`run_pipeline.py:281`, `submit_eval_job.py:116`), referenced by key on an
 > unversioned prefix. The image is digest-pinned; the *script it runs* is not.
 > So `s3:PutObject` on two prefixes is root code execution inside a GPU
 > container holding the execution role. Unreachable in the documented

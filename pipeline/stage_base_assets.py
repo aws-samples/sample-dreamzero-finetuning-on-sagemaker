@@ -20,7 +20,7 @@ from pipeline_config import load_config
 
 os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
 
-# Revisions are pinned to commit SHAs (2026-08-22) so a re-staging always
+# Revisions are pinned to commit SHAs so a re-staging always
 # fetches the exact weights this sample was validated against — an upstream
 # force-push or compromised repo can silently change `main`, and the failure
 # mode would be a subtly different base model, not an error. To move to newer

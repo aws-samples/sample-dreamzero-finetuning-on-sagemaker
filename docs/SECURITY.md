@@ -46,8 +46,8 @@ has to guess.
 
 | Finding | File(s) | Resolution |
 |---|---|---|
-| **B202 `tarfile.extractall`** (High) — a crafted `model.tar.gz` could write outside the extraction directory | `pipeline/run_pipeline.py:460-473` | **Fixed.** Extraction uses `filter="data"` (rejects `..`, absolute paths, links, devices, setuid bits) on Python 3.12+, with an explicit per-member validation loop as the fallback on older interpreters. `# nosec B202` carries the reasoning for *both* paths inline. |
-| **B615 unpinned `snapshot_download`** (Medium ×2) — a hijacked upstream `main` would silently change the base weights you train against | `pipeline/stage_base_assets.py:139-140`, `pipeline/run_pipeline.py:515-517` | **Fixed.** All three base repos are pinned to commit SHAs in `stage_base_assets.py::JOBS`; the dataset download passes the `revision` from config (the shipped default is the `v2.1` tag). `# nosec B615` records that a revision is always supplied. |
+| **B202 `tarfile.extractall`** (High) — a crafted `model.tar.gz` could write outside the extraction directory | `pipeline/run_pipeline.py:444-457` | **Fixed.** Extraction uses `filter="data"` (rejects `..`, absolute paths, links, devices, setuid bits) on Python 3.12+, with an explicit per-member validation loop as the fallback on older interpreters. `# nosec B202` carries the reasoning for *both* paths inline. |
+| **B615 unpinned `snapshot_download`** (Medium ×2) — a hijacked upstream `main` would silently change the base weights you train against | `pipeline/stage_base_assets.py:139-140`, `pipeline/run_pipeline.py:499-501` | **Fixed.** All three base repos are pinned to commit SHAs in `stage_base_assets.py::JOBS`; the dataset download passes the `revision` from config (the shipped default is the `v2.1` tag). `# nosec B615` records that a revision is always supplied. |
 | **CKV_DOCKER_3** — image runs as `root` | `docker/Dockerfile:16` | **Skipped with reason.** SageMaker mounts `/opt/ml/{input,model,checkpoints}` root-owned and its checkpoint-sync agent requires root; the image is a batch process, never a network service. Fully discussed in "Known gaps" #1 — this is the one item you may still want to change. |
 | **CKV_DOCKER_2** — no `HEALTHCHECK` | `docker/Dockerfile:20` | **Skipped with reason.** `HEALTHCHECK` is a long-running-service mechanism; SageMaker training jobs are batch and the platform never consults it. |
 | **Semgrep `dockerfile-pip-extra-index-url`** — extra package index widens the supply chain | `docker/Dockerfile:71` | **Skipped with reason.** The extra index is PyTorch's own CUDA 12.9 wheel host (`download.pytorch.org/whl/cu129`), the documented install path for these builds; every other package resolves from PyPI. The `nosemgrep` marker sits on the line *directly* above the `RUN`: semgrep honours it only on the same or the immediately preceding line, so a comment inserted between the two silently voids the suppression. |
@@ -208,7 +208,7 @@ guessing.
 3. **Base image and OS-package currency.** The Dockerfile pins the SageMaker
    PyTorch DLC tag `2.8.0-gpu-py312-cu129-ubuntu22.04-sagemaker` and every
    dependency *this repo installs by name* — `deepspeed==0.16.9`,
-   `transformers==4.51.3`, `flash-attn==2.8.3.post1` built from source — because
+   `transformers==4.51.3`, `flash-attn==2.8.3.post1` — because
    that exact combination is the validated environment. Pinning is right for
    reproducibility and wrong for CVE exposure: **the image starts accumulating
    vulnerabilities the day you fork.** ECR scan-on-push is enabled so the
@@ -242,7 +242,9 @@ guessing.
    **What has been closed: the inventory half.**
    [DEPENDENCY-INVENTORY.md](DEPENDENCY-INVENTORY.md) records a `pip-audit` scan of
    the built `v11` image (digest recorded there, scanned 2026-09-02) with the exact
-   commands to reproduce it: **382 packages installed, 7 carrying 33 unique
+   commands to reproduce it. The shipped `v13` image differs from `v11` only by
+   `docker/patches/0004` (a source patch to upstream) and a rewritten training
+   entrypoint; neither installs a package, so the inventory applies unchanged. The scan reports: **382 packages installed, 7 carrying 33 unique
    advisories.** It also triages reachability rather than reporting a count, and
    the headline result is one advisory that is **not** dismissible:
 
@@ -322,24 +324,23 @@ guessing.
 
     - the merge job is submitted with
       `ContainerEntrypoint: ["python", "/opt/ml/input/data/lora/merge_lora.py"]`
-      (`run_pipeline.py:279`), and the driver uploads that file to
+      (`run_pipeline.py:265`), and the driver uploads that file to
       `sagemaker/lora-checkpoints/<job>/merge_lora.py` moments earlier
-      (`run_pipeline.py:468-469` and `:497-498`);
+      (`run_pipeline.py:452-453` and `:497-498`);
     - the eval job is submitted with
       `ContainerEntrypoint: ["bash", "/opt/ml/input/data/evalscript/run_eval_in_job.sh"]`
       (`submit_eval_job.py:116`) and reads it from the `sagemaker/eval-assets/`
       prefix you upload by hand (`:60-67`);
-    - the **training** job restores its own checkpoint mirror at start-up.
-      `train_entrypoint.sh:532-546` syncs `sagemaker/checkpoints-sync/<job>/` (the
-      prefix the driver sets at `run_pipeline.py:234`) into the output directory,
-      and DeepSpeed 0.16.9 then unpickles those shards with
-      `weights_only=False` — arbitrary code, by design of the pickle format.
-      This is not new in kind: the manual `ckpt` input channel always resumed
-      from the same prefix the same way. What changed in image v10 is that it is
-      now **automatic** on every start, so it no longer takes an operator
-      deciding to chain a resume. It is also the one entrypoint of the three that
-      a *third party* never writes: only the training job itself and whoever
-      staged a seed checkpoint put objects there.
+    - the **training** job resumes from its checkpoint prefix. `CheckpointConfig`
+      (`run_pipeline.py:198`) makes SageMaker restore
+      `sagemaker/checkpoints-sync/<job>/` into `/opt/ml/checkpoints` on a
+      relaunch, the entrypoint's guard (`train_entrypoint.sh:137`) keeps
+      only complete checkpoints, and DeepSpeed 0.16.9 then unpickles those
+      shards with `weights_only=False` — arbitrary code, by design of the pickle
+      format. The restore is **automatic** on every relaunch, so it does not
+      take an operator deciding to chain a resume. It is also the one prefix of
+      the three that a *third party* never writes: only the training job itself
+      and whoever staged a seed checkpoint put objects there.
 
     All three prefixes are unversioned (gap #2) and the object is referenced by
     key, not by `VersionId`. So any principal holding `s3:PutObject` on those
@@ -371,10 +372,10 @@ guessing.
     name. Resuming from a checkpoint *is* loading a pickle; the only real
     mitigations are keeping write access to that prefix down to the job's own
     role, or accepting a from-scratch restart instead of a resume. If you would
-    rather have the restart, unset `checkpoint_s3_uri` on the training job:
-    `train_entrypoint.sh:245` makes the restore path a no-op without it. Weigh
-    that properly, though — the same variable drives the upload loop, so
-    unsetting it means no checkpoint ever leaves the instance, and an interrupted
+    rather have the restart, drop `CheckpointConfig` from the training job spec in
+    `run_pipeline.py`: nothing is restored without it. Weigh that properly,
+    though — the same setting is what mirrors checkpoints to S3 at all, so
+    without it no checkpoint ever leaves the instance, and an interrupted
     spot job loses **all** of its progress rather than the last few hundred
     steps.
 

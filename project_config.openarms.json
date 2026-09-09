@@ -27,7 +27,7 @@
   },
 
   "compute": {
-    "_comment": "ml.g7e.48xlarge (8x 96GB). volume_gb is inert on instance types with NVMe instance store — this one gets ~13TiB of scratch regardless of the 500 below. It only bites on EBS-only types, where 119GiB of input channels plus (save_total_limit + 1) x ~89GiB of checkpoints needs >=900. Runtime caps are not billed; only actual usage is.",
+    "_comment": "ml.g7e.48xlarge (8x 96GB). volume_gb is inert on instance types with NVMe instance store — this one gets ~13TiB of scratch regardless of the 500 below. It only bites on EBS-only types, where 119GiB of input channels plus (save_total_limit + 1) x ~3.6GiB of checkpoints fits easily in the 500 below (checkpoints carry the LoRA weights and optimizer states only — docker/patches/0004 keeps the frozen base out of them). Runtime caps are not billed; only actual usage is.",
     "smoke": { "instance_type": "ml.g7e.48xlarge", "volume_gb": 500, "max_runtime_hours": 3, "steps": 30 },
     "train": { "instance_type": "ml.g7e.48xlarge", "volume_gb": 500, "max_runtime_hours": 100 },
     "merge": { "instance_type": "ml.g7e.48xlarge", "volume_gb": 500, "max_runtime_hours": 4 },

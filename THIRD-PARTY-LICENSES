@@ -29,7 +29,9 @@ Files derived from this project:
   - docker/patches/0003-batch-broadcast-has-real-action.patch  (modifies
     groot/vla/model/dreamzero/action_head/wan_flow_matching_action_tf.py at
     commit ab790c1)
-    The three patch files contain excerpts of DreamZero source under its
+  - docker/patches/0004-exclude-frozen-params-from-deepspeed-checkpoints.patch
+    (modifies groot/vla/experiment/base.py at commit ab790c1)
+    The four patch files contain excerpts of DreamZero source under its
     Apache License, Version 2.0; the modifications they introduce are
     Copyright Amazon.com, Inc. or its affiliates, contributed under the same
     license. docker/Dockerfile applies them to the cloned repository at

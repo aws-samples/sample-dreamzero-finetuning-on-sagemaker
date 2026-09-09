@@ -101,16 +101,16 @@ keeps every frame, so it does).
 `configs/aloha_bimanual_14dim.yaml` is the validated default for ALOHA-like
 14-dim bimanual data.
 
-## Validation status
+## What is validated
 
-- **Golden test PASSED**: `prep_dataset.py` + the ALOHA config reproduces the
-  reference-validated GEAR dataset exactly — all meta JSONs parsed-equal, both
-  jsonl exact, all parquets md5-identical, same video tree. That dataset
-  trained the 0.0957-loss run and the 0.00106-MSE validated checkpoint.
-- **End-to-end PASSED**: the full chain (fetch → validate → prep → stage →
-  smoke → train → merge) has run with paid jobs; the root README's headline
-  numbers come from that run. On a new dataset, still watch the smoke gate
-  before letting the full run proceed.
+- **The prep is exact.** `prep_dataset.py` with the ALOHA config reproduces
+  the GEAR dataset the reference run trained on byte-for-byte — all meta JSONs
+  parsed-equal, both jsonl exact, all parquets md5-identical, same video tree.
+  That dataset produced the 0.0957-loss run and the 0.00106-MSE checkpoint.
+- **The full chain has run end to end** (fetch → validate → prep → stage →
+  smoke → train → merge) with paid jobs; the root README's headline numbers
+  come from that run. On a new dataset, still watch the smoke gate before
+  letting the full run proceed.
 
 ## Caveats
 
@@ -173,70 +173,42 @@ keeps every frame, so it does).
   never hit this. It fires ~5 min in, after weight loading and a clean NCCL
   init, so it reads like a training bug; filter `NCCL INFO`/`NET/OFI` out of
   the CloudWatch log to see the real message.
-- **The entrypoint owns checkpoint sync; the launcher deliberately does not
-  set `CheckpointConfig` — so image and launcher versions travel together.**
-  SageMaker's checkpoint sync agent can fail the whole job with a generic
-  `InternalServerError: We encountered an internal error. Please try again.`
-  whenever a multi-GB save burst lands in its LocalPath — at a *mid-run*
-  checkpoint save (killing an otherwise healthy multi-day run at its first
-  save, container still stepping normally) or during teardown right after
-  training succeeded. Reproduced 4/4 in this account (eu-central-1,
-  `ml.g7e.48xlarge`, 2026-08-18/19) — fingerprint is `Training -> Failed` with
-  **no** `Uploading` transition and a null `ModelArtifacts` — while a
-  byte-identical control without `CheckpointConfig` reached
-  `Uploading -> Completed`.
-
-  AWS documents the same symptom and prescribes exactly this workaround, in
-  [Model Parallel Troubleshooting § Saving Checkpoints](https://docs.aws.amazon.com/sagemaker/latest/dg/distributed-troubleshooting-model-parallel.html):
-  the error *"could be caused by a SageMaker AI limitation while uploading the
-  local checkpoint to Amazon S3 during training … do not use
-  `checkpoint_s3_uri`"*, followed by `sync_local_checkpoints_to_s3()` and
-  `sync_s3_checkpoints_to_local()` helpers. Read that citation with its limits
-  in view: AWS hedges with *"could"*, and the page sits under *"(Archived)
-  SageMaker model parallelism library v1.x"* with its remedy gated on
-  `smp.local_rank()`, whereas this recipe runs DeepSpeed ZeRO-2 and has never
-  used SMP. It is a matching symptom and a sanctioned workaround, not a
-  statement about this configuration; the 4/4 is the real evidence. No numeric
-  limit is published anywhere (neither `API_CheckpointConfig` nor Service
-  Quotas bounds checkpoint bytes or object count), so there is no threshold to
-  design against.
-
-  The image implements **both** helpers: since v9 a 60-second
-  `aws s3 sync` loop to `checkpoints-sync/<job>/` (the same layout
-  `CheckpointConfig` produced, so live loss streaming and crash survival are
-  unchanged) plus a verified final sync that completes *before* the container
-  exits; and since v10 the download half at start-up, so a job that
-  starts again under the same name resumes from the newest **complete**
-  checkpoint — completeness meaning one optimizer shard per GPU on this instance
-  plus `latest`, `trainer_state.json` and `scheduler.pt`, each size-checked
-  against the S3 listing so a save mirrored mid-write is rejected rather than
-  loaded. **Use v11+**: v10 restores, but a `ckpt` channel staged from a previous
-  run's output prefix makes the job report SUCCESS having trained nothing, a
-  bucket-root checkpoint URI never finds its own mirror, and an all-rejected
-  prefix is logged as though it were empty. Measured on a real spot reclaim
-  2026-09-01: 26 files verified, resumed from step 7,500 in 155 s. Without that second
-  half a spot restart is a data-loss event, not just a cost one: the relaunched
-  attempt re-uploads `checkpoint-N/` over the **same keys** in a non-versioned
-  bucket, destroying the better-trained recovery point (measured 2026-08-30 —
-  ~3,900 steps and ~$480 of work overwritten by from-scratch weights).
-  Consequence of the pairing:
-  **don't run this launcher against an image older than v9** — the old
-  entrypoint wrote checkpoints to `/opt/ml/checkpoints`, which without a
-  `CheckpointConfig` mount is the small root overlay filesystem, and a
-  multi-GB save fills it (`No space left on device` mid-run).
+- **Checkpoints go through SageMaker's `CheckpointConfig`.** The launcher sets
+  `LocalPath=/opt/ml/checkpoints` and `S3Uri=checkpoints-sync/<job>/` on every
+  training job; SageMaker mounts the path on the data volume, mirrors each save
+  to S3 as the trainer writes it, and on a managed-spot relaunch restores the
+  prefix before the container starts. Upstream's trainer resumes from the
+  highest `checkpoint-*/` on its own. What the entrypoint adds is a
+  completeness guard in front of it: one optimizer shard per GPU on this
+  instance plus `latest`, `trainer_state.json`, `scheduler.pt`, the adapter and
+  its config, no zero-byte file, and sizes consistent across the run's
+  checkpoints. A checkpoint torn by a mid-save reclaim is deleted so the trainer
+  falls back to the previous one rather than failing in `torch.load`. The guard
+  then reads the newest checkpoint's `global_step`: at or past `max_steps` (a
+  reclaim between the last save and teardown) the finished weights stay and the
+  trainer skips to staging them; below it (a deliberate continuation with a
+  higher `max_steps`) the finished run's top-level `config.json` is removed,
+  because upstream reads it as "skip training" and would report SUCCESS having
+  trained nothing. Without
+  that guard a spot restart can be a data-loss event, not just a cost one: a
+  relaunch that trains from step 0 re-uploads `checkpoint-N/` over the **same
+  keys** in a non-versioned bucket, destroying the better-trained recovery
+  point — so the guard never fails open. Checkpoints are ~3.6 GB each
+  (`docker/patches/0004`), so the mirror is cheap and `/opt/ml/checkpoints`
+  never fills.
 
 - **A job that failed *after* training succeeded is still recovered
-  automatically.** This is one signature of the sync-agent failure above; it
-  should not occur on v9+ jobs, but jobs launched with `CheckpointConfig` by
-  older revisions can still hit it, so the recovery machinery stays in as
-  defense-in-depth. Recognizing it: the failure lands seconds after the
+  automatically.** It is rare, but SageMaker's post-container finalization can
+  fail independently of anything the container did, so the recovery machinery
+  stays in as defense-in-depth. Recognizing it: the failure lands seconds after the
   container *already exited cleanly* — if `=== done ===` is in the log,
   torchrun returned 0 and `model.safetensors` was verified present in
   `/opt/ml/model`, so nothing in your code or data is at fault. There is no
   Python traceback, and `FailureReason` is the generic string rather than
   `ENTRYPOINT FAILURE: …` (a real container-side fault surfaces through
-  `/opt/ml/output/failure`, so it would say so). On such legacy jobs expect a
-  **truncated** `checkpoints-sync/<job>/` alongside it: the trainer writes a
+  `/opt/ml/output/failure`, so it would say so). If the job's sync was still
+  draining when it failed, expect a **truncated** `checkpoints-sync/<job>/`
+  alongside it: the trainer writes a
   checkpoint's `model.safetensors` and `config.json` *first* and its DeepSpeed
   resume states last, so the truncation eats resume states while the LoRA
   weights — the only thing the merge needs — land intact minutes earlier.
@@ -258,9 +230,9 @@ keeps every frame, so it does).
 
   If you do end up driving it by hand, run `--start-at merge --train-job <job>`
   after confirming the run was healthy in `checkpoints-sync/<job>/loss_log.jsonl`.
-  **Don't resubmit a long run over a post-training failure** — it was
-  reproducible on a given configuration rather than transient, so a retry is
-  likely to burn the same hours and fail the same way at the end.
+  **Don't resubmit a long run over a post-training failure** — the training
+  itself finished and its checkpoints are already in S3, so a retry only buys
+  the same hours again; merge what you have.
 
 - Lost the terminal during a multi-day run? The SageMaker job is server-side and
   does not care, but the local process is what carries the run into merge. Re-

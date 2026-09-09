@@ -37,9 +37,9 @@ def _configured_tag() -> str:
     digest-pinned URI to SSM."""
     try:
         return (json.loads((ROOT / "project_config.json").read_text())
-                .get("image", {}).get("tag")) or "v11"
+                .get("image", {}).get("tag")) or "v13"
     except (OSError, json.JSONDecodeError):
-        return "v11"
+        return "v13"
 
 # CfnOutput logical id -> config key
 MAP = {

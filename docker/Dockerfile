@@ -4,7 +4,8 @@
 #   torch 2.8.0+cu129 / python 3.12  (from the SageMaker PyTorch DLC)
 #   dreamzero @ ab790c1 (upstream main used by the EC2 run)
 #   deepspeed 0.16.9   (0.19.x circular-imports vs pinned transformers 4.51.3)
-#   flash-attn 2.8.3.post1 built from source at image-build time (no GPU needed)
+#   flash-attn 2.8.3.post1 (prebuilt wheel when one matches this torch/CUDA/python,
+#   compiled from source otherwise — no GPU needed either way)
 #     Verified cubins in the built wheel: sm80, sm90, sm100, sm120 — i.e.
 #     A100 80GB (ml.p4de), H100 (ml.p5), H200 (ml.p5e/p5en), and Blackwell
 #     (ml.g7e) all run. flash-attn's setup.py emits its own -gencode flags on
@@ -59,6 +60,12 @@ RUN git clone ${DREAMZERO_REPO} dreamzero \
 # run used batch size 1, hiding it; at per_device_train_batch_size >= 2 every
 # rank fails deterministically on the first step with "The size of tensor
 # a (B) must match the size of tensor b (T)". Fixed to [:, None, None].
+# CRITICAL FIX #8 (patches/0004): transformers' Trainer passes
+# exclude_frozen_parameters=True to DeepSpeed's save_checkpoint only for a PEFT
+# PeftModel; DreamZero injects LoRA itself, so every checkpoint carried the whole
+# frozen backbone in global_step*/mp_rank_00_model_states.pt (~85 GiB) next to a
+# <0.5 GB adapter. The patch flips that gate for the save and makes the resume
+# load non-strict, so a checkpoint is a few GB and still resumable.
 COPY patches/ /opt/ml/code/patches/
 RUN cd dreamzero && git apply /opt/ml/code/patches/*.patch
 
@@ -75,8 +82,9 @@ RUN pip install --no-cache-dir -e . --extra-index-url https://download.pytorch.o
 # circular-imports against transformers==4.51.3. Must come AFTER `pip install -e .`.
 RUN pip install --no-cache-dir deepspeed==0.16.9
 
-# CRITICAL FIX #2: flash-attn from source. TORCH_CUDA_ARCH_LIST lets
-# it compile without a GPU in the build environment.
+# CRITICAL FIX #2: flash-attn. Its setup.py downloads a prebuilt wheel when one
+# matches this torch/CUDA/python triple (the usual case, ~30 s) and compiles from
+# source otherwise; TORCH_CUDA_ARCH_LIST lets that fallback compile without a GPU.
 ENV TORCH_CUDA_ARCH_LIST="9.0;12.0"
 RUN pip install --no-cache-dir ninja packaging \
     && MAX_JOBS=16 pip install --no-cache-dir --no-build-isolation flash-attn==2.8.3.post1
